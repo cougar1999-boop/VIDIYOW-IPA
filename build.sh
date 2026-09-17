@@ -12,7 +12,8 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken..."
+echo "Stap 2: iOS Project configuratie aanmaken (zonder Storyboards)..."
+# We sluiten alle .storyboard bestanden expliciet uit om exit code 65 te voorkomen
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -22,7 +23,10 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: "15.0"
-    sources: [VIDIYOW]
+    sources:
+      - path: VIDIYOW
+        excludes:
+          - "**/*.storyboard"
     settings:
       CODE_SIGNING_ALLOWED: NO
       CODE_SIGNING_REQUIRED: NO
@@ -35,8 +39,7 @@ xcodegen generate
 echo "Stap 4: Projectformaat handmatig downgraden naar Xcode 15..."
 sed -i '' 's/objectVersion = 77;/objectVersion = 60;/g' "$ROOT/VIDIYOW.xcodeproj/project.pbxproj" || true
 
-echo "Stap 5: App compileren voor echte iPhone (zonder Storyboard validatie)..."
-# We voegen IBTOOL_NO_COMPILATION=YES toe om de crash op regel 10 te omzeilen
+echo "Stap 5: App compileren voor echte iPhone..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -47,7 +50,6 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
-  IBTOOL_NO_COMPILATION=YES \
   build
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"
