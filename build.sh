@@ -18,17 +18,26 @@ if [ -d "$ROOT/Vidiyow" ]; then SOURCEMAP="Vidiyow"; fi
 if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gevonden in map: $SOURCEMAP"
 
-echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
+echo "Stap 2: Swift programmeerfouten in NativePlayerViewController automatisch repareren..."
 FILE="$ROOT/$SOURCEMAP/Player/NativePlayerViewController.swift"
+
+# Herstel 1: De foute Autolayout Constraint fixen met geldige NSLayoutConstraint syntaxis
 if [ -f "$FILE" ]; then
-  sed -i '' 's/multiplier: 0.22/multiplier: 1.0, constant: 22/g' "$FILE" || true
+  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' "$FILE" || true
+  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' "$FILE" || true
 else
-  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/multiplier: 0.22/multiplier: 1.0, constant: 22/g' {} + || true
+  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' {} + || true
+  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' {} + || true
+fi
+
+# Herstel 2: De ontbrekende AVURLAssetHTTPHeaderFieldsKey repareren naar een String key
+if [ -f "$FILE" ]; then
+  sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' "$FILE" || true
+else
+  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' {} + || true
 fi
 
 echo "Stap 3: iOS Project configuratie aanmaken..."
-# We vertellen XcodeGen nu geforceerd om GEEN Info.plist te linken vanuit de resources, 
-# maar deze door Xcode zelf te laten genereren op basis van de target settings.
 cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -46,7 +55,7 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.vidiyow.player
       GENERATE_INFOPLIST_FILE: YES
-      INFOPLIST_KEY_CFBundleCFBundleShortVersionString: "1.0"
+      INFOPLIST_KEY_CFBundleShortVersionString: "1.0"
       INFOPLIST_KEY_CFBundleVersion: "1"
       INFOPLIST_KEY_UILaunchScreen_StoryboardName: ""
       CODE_SIGNING_ALLOWED: NO
