@@ -12,7 +12,7 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken (iOS 17.0 & Juiste Bundle ID)..."
+echo "Stap 2: iOS Project configuratie aanmaken (iOS 17.0 & Concurrency-fix)..."
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -31,15 +31,15 @@ targets:
       CODE_SIGNING_ALLOWED: NO
       CODE_SIGNING_REQUIRED: NO
       CODE_SIGN_IDENTITY: ""
+      SWIFT_STRICT_CONCURRENCY: minimal
 EOF
 
 echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: Projectformaat handmatig downgraden naar Xcode 15..."
-sed -i '' 's/objectVersion = 77;/objectVersion = 60;/g' "$ROOT/VIDIYOW.xcodeproj/project.pbxproj" || true
+# NOTA: De sed-downgrade (objectVersion) is hier weggelaten omdat Xcode 16 dit formaat ondersteunt.
 
-echo "Stap 5: App compileren voor echte iPhone..."
+echo "Stap 4: App compileren voor echte iPhone (via Xcode 16)..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -50,6 +50,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  SWIFT_STRICT_CONCURRENCY=minimal \
   build
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"

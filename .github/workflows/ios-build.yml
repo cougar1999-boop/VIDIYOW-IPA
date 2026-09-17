@@ -2,12 +2,12 @@ name: Build iOS App
 
 on:
   push:
-    branches: [ main, master ] # Start de build zodra je naar main of master pusht
-  workflow_dispatch: # Hierdoor kun je de build ook handmatig starten via de GitHub website
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build-ios:
-    runs-on: macos-14 # Start een virtuele Mac met Xcode 15+
+    runs-on: macos-15 # Update naar macOS 15 met Xcode 16+
     
     steps:
       - name: Code ophalen uit repository
