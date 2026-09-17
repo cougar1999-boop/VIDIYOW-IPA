@@ -13,19 +13,19 @@ rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
 echo "Stap 1b: Zoeken naar de juiste hoofdmap met bronbestanden..."
-# We zoeken automatisch of de map VIDIYOW, Vidiyow of vidiyow heet
 SOURCEMAP="VIDIYOW"
 if [ -d "$ROOT/Vidiyow" ]; then SOURCEMAP="Vidiyow"; fi
 if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gevonden in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
+# We herstellen de constraint-fout door de multiplier op 1.0 te zetten en de gewenste waarde via de constant toe te voegen.
+# Dit is de enige syntactisch geldige manier in Swift om een UIKit-crash te voorkomen.
 FILE="$ROOT/$SOURCEMAP/Player/NativePlayerViewController.swift"
 if [ -f "$FILE" ]; then
-  sed -i '' 's/multiplier: 0.22/constant: 22/g' "$FILE" || true
+  sed -i '' 's/multiplier: 0.22/multiplier: 1.0, constant: 22/g' "$FILE" || true
 else
-  # Als de mapstructuur anders is, herstel het bestand overal waar het staat
-  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/multiplier: 0.22/constant: 22/g' {} + || true
+  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/multiplier: 0.22/multiplier: 1.0, constant: 22/g' {} + || true
 fi
 
 echo "Stap 3: iOS Project configuratie aanmaken..."
