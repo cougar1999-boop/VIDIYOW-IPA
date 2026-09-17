@@ -9,13 +9,6 @@ final class NativePlayerViewController: UIViewController {
     private let portal: String
     private let referer: String
     private let userAgent: String
-    private let sourceType: String
-    private let sessionId: String
-    private let mac: String
-    private let model: String
-    private let fallbackURL: URL?
-    private var activePlaybackURL: URL
-    private var usedFallback = false
 
     private var player: AVPlayer!
     private var playerLayer: AVPlayerLayer!
@@ -50,7 +43,7 @@ final class NativePlayerViewController: UIViewController {
     private var controlsTimer: Timer?
     private var isSeeking = false
 
-    init(url: String, title: String, mediaType: String, year: String, portal: String, referer: String, userAgent: String, sourceType: String = "", sessionId: String = "", mac: String = "", model: String = "MAG254") {
+    init(url: String, title: String, mediaType: String, year: String, portal: String, referer: String, userAgent: String) {
         self.streamURL = URL(string: url) ?? URL(string: "about:blank")!
         self.mediaTitle = title
         self.mediaType = mediaType
@@ -58,12 +51,6 @@ final class NativePlayerViewController: UIViewController {
         self.portal = portal
         self.referer = referer
         self.userAgent = userAgent.isEmpty ? VIDIYOWConstants.defaultUserAgent : userAgent
-        self.sourceType = sourceType.lowercased()
-        self.sessionId = sessionId
-        self.mac = mac
-        self.model = model.isEmpty ? "MAG254" : model
-        self.activePlaybackURL = self.streamURL
-        self.fallbackURL = NativePlayerViewController.makeVodProxyURL(original: self.streamURL, referer: referer, mediaType: mediaType)
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -115,6 +102,16 @@ final class NativePlayerViewController: UIViewController {
         stallTimer?.invalidate()
         saveTimer?.invalidate()
         controlsTimer?.invalidate()
+    }
+
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
+            try session.setActive(true)
+        } catch {
+            print("VIDIYOW audio session error: \(error)")
+        }
     }
 
     private func setupUI() {
@@ -215,57 +212,18 @@ final class NativePlayerViewController: UIViewController {
         button.heightAnchor.constraint(equalToConstant: 34).isActive = true
     }
 
-    private static func makeVodProxyURL(original: URL, referer: String, mediaType: String) -> URL? {
-        guard mediaType == "movie" || mediaType == "episode" else { return nil }
-        var c = URLComponents(string: "https://vod.vidiyow.com/vod.php")
-        var q: [URLQueryItem] = [
-            URLQueryItem(name: "url", value: original.absoluteString),
-            URLQueryItem(name: "vod", value: "1")
-        ]
-        let lower = original.absoluteString.lowercased()
-        if let dot = lower.lastIndex(of: ".") {
-            let ext = lower[lower.index(after: dot)...].split(whereSeparator: { $0 == "?" || $0 == "#" }).first.map(String.init) ?? ""
-            if !ext.isEmpty && ext.count <= 8 { q.append(URLQueryItem(name: "ext", value: ext)) }
-        }
-        if !referer.isEmpty { q.append(URLQueryItem(name: "referer", value: referer)) }
-        c?.queryItems = q
-        return c?.url
-    }
-
-    private func makeStalkerHLSURL() -> URL? {
-        guard sourceType == "stalker", !streamURL.absoluteString.lowercased().contains(".m3u8") else { return nil }
-        var c = URLComponents(string: "https://vidiyow.com/api/stalker-hls.php")
-        var q = [URLQueryItem(name: "url", value: streamURL.absoluteString)]
-        if !sessionId.isEmpty { q.append(URLQueryItem(name: "sid", value: sessionId)) }
-        if !portal.isEmpty { q.append(URLQueryItem(name: "portal", value: portal)) }
-        if !mac.isEmpty { q.append(URLQueryItem(name: "mac", value: mac)) }
-        if !model.isEmpty { q.append(URLQueryItem(name: "model", value: model)) }
-        c?.queryItems = q
-        return c?.url
-    }
-
-    private func initialPlaybackURL() -> URL {
-        if let hls = makeStalkerHLSURL() { return hls }
-        return streamURL
-    }
-
-    private func configureAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
-            try session.setActive(true, options: [])
-        } catch {
-            print("VIDIYOW audio session setup failed: \(error)")
-        }
-    }
-
     private func configurePlayer() {
-        activePlaybackURL = initialPlaybackURL()
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
-        let asset = AVURLAsset(url: activePlaybackURL, options: options)
+        let options: [String: Any] = [
+            AVURLAssetHTTPUserAgentKey: userAgent,
+            AVURLAssetHTTPHeaderFieldsKey: ["Accept": "*/*", "User-Agent": userAgent, "Referer": referer].filter { !$0.value.isEmpty }
+        ]
+        let asset = AVURLAsset(url: streamURL, options: options)
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isVOD ? 60.0 : 15.0
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = true
         player.isMuted = false
         player.volume = 1.0
         player.actionAtItemEnd = .pause
@@ -289,13 +247,7 @@ final class NativePlayerViewController: UIViewController {
                     }
                 } else if item.status == .failed {
                     if self.isVOD { self.saveResume(self.player?.currentTime().seconds ?? 0) }
-                    if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
-                        self.usedFallback = true
-                        self.activePlaybackURL = fallback
-                        self.recreatePlayer(at: self.player?.currentTime().seconds ?? 0)
-                    } else {
-                        self.recoverPlayback()
-                    }
+                    self.recoverPlayback()
                 }
             }
         }
@@ -480,10 +432,16 @@ final class NativePlayerViewController: UIViewController {
         guard !isBeingDismissed else { return }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
-        let asset = AVURLAsset(url: activePlaybackURL, options: options)
+        let options: [String: Any] = [
+            AVURLAssetHTTPUserAgentKey: userAgent,
+            AVURLAssetHTTPHeaderFieldsKey: ["Accept": "*/*", "User-Agent": userAgent, "Referer": referer].filter { !$0.value.isEmpty }
+        ]
+        let asset = AVURLAsset(url: streamURL, options: options)
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isVOD ? 60.0 : 15.0
+        item.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         player?.replaceCurrentItem(with: item)
+        player?.automaticallyWaitsToMinimizeStalling = true
         player?.isMuted = false
         player?.volume = 1.0
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -492,15 +450,7 @@ final class NativePlayerViewController: UIViewController {
                 if self.isVOD && position > 0 { self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
                 self.hideLoading()
                 self.player?.play()
-            } else if item.status == .failed {
-                if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
-                    self.usedFallback = true
-                    self.activePlaybackURL = fallback
-                    self.recreatePlayer(at: position)
-                } else {
-                    self.recoverPlayback()
-                }
-            }
+            } else if item.status == .failed { self.recoverPlayback() }
         }
     }
 
@@ -523,35 +473,74 @@ final class NativePlayerViewController: UIViewController {
                     self.lastLiveTime = t
                     self.lastLiveProgressAt = now
                 }
-                if now.timeIntervalSince(self.lastLiveProgressAt) >= 30 { self.recoverPlayback(); self.lastLiveProgressAt = now }
+                if now.timeIntervalSince(self.lastLiveProgressAt) >= 45 { self.recoverPlayback(); self.lastLiveProgressAt = now }
             } else if p.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(self.lastLiveProgressAt) >= 30 {
                 self.recoverPlayback(); self.lastLiveProgressAt = now
             }
         }
     }
 
-    private func searchSubtitles() {
-        guard isVOD, !mediaTitle.isEmpty else { return }
+    private func searchSubtitles(completion: ((Bool) -> Void)? = nil) {
+        guard isVOD, !mediaTitle.isEmpty else { completion?(false); return }
         var components = URLComponents(string: VIDIYOWConstants.subtitleAPI)
-        components?.queryItems = [URLQueryItem(name: "action", value: "search"), URLQueryItem(name: "title", value: mediaTitle), URLQueryItem(name: "year", value: year)]
-        guard let url = components?.url else { return }
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let items = root["results"] as? [[String: Any]] else { return }
+        components?.queryItems = [
+            URLQueryItem(name: "action", value: "search"),
+            URLQueryItem(name: "title", value: mediaTitle),
+            URLQueryItem(name: "year", value: year)
+        ]
+        guard let url = components?.url else { completion?(false); return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self, error == nil, let data,
+                  let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let items = root["results"] as? [[String: Any]] else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
             var results: [(String,String,String)] = []
             for item in items {
-                guard let lang = item["language"] as? String, let fileID = item["file_id"] as? String, !lang.isEmpty, !fileID.isEmpty else { continue }
-                results.append((lang, self.subtitleLabel(for: lang), fileID))
+                let lang = (item["language"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let fileID = (item["file_id"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !lang.isEmpty && !fileID.isEmpty { results.append((lang, self.subtitleLabel(for: lang), fileID)) }
             }
-            DispatchQueue.main.async { self.subtitleSearchResults = results }
+            DispatchQueue.main.async {
+                self.subtitleSearchResults = results
+                completion?(!results.isEmpty)
+            }
         }.resume()
     }
 
     @objc private func showSubtitleMenu() {
-        let alert = UIAlertController(title: "Ondertitels", message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "Off", style: .default) { [weak self] _ in self?.subtitleCues.removeAll() })
-        for result in subtitleSearchResults {
-            alert.addAction(UIAlertAction(title: result.label, style: .default) { [weak self] _ in self?.loadSubtitle(fileID: result.fileID, language: result.language) })
+        guard isVOD else { return }
+        if subtitleSearchResults.isEmpty {
+            showLoading("Ondertitels zoeken…")
+            searchSubtitles { [weak self] found in
+                guard let self else { return }
+                self.hideLoading()
+                if found { self.presentSubtitleMenu() }
+                else {
+                    let alert = UIAlertController(title: "Ondertitels", message: "Geen ondertitels gevonden.", preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "Opnieuw zoeken", style: .default) { [weak self] _ in self?.searchSubtitles() })
+                    alert.addAction(UIAlertAction(title: "OK", style: .cancel))
+                    self.present(alert, animated: true)
+                }
+            }
+        } else {
+            presentSubtitleMenu()
         }
+    }
+
+    private func presentSubtitleMenu() {
+        let alert = UIAlertController(title: "Ondertitels", message: nil, preferredStyle: .actionSheet)
+        alert.addAction(UIAlertAction(title: "Uit", style: .default) { [weak self] _ in
+            self?.subtitleCues.removeAll(); self?.subtitleLabel.isHidden = true
+        })
+        for result in subtitleSearchResults {
+            alert.addAction(UIAlertAction(title: result.label, style: .default) { [weak self] _ in
+                self?.loadSubtitle(fileID: result.fileID, language: result.language)
+            })
+        }
+        alert.addAction(UIAlertAction(title: "Opnieuw zoeken", style: .default) { [weak self] _ in self?.searchSubtitles() })
         alert.addAction(UIAlertAction(title: "Annuleren", style: .cancel))
         if let pop = alert.popoverPresentationController { pop.sourceView = ccButton; pop.sourceRect = ccButton.bounds }
         present(alert, animated: true)
@@ -562,11 +551,17 @@ final class NativePlayerViewController: UIViewController {
         components?.queryItems = [URLQueryItem(name: "action", value: "download"), URLQueryItem(name: "file_id", value: fileID)]
         guard let url = components?.url else { return }
         showLoading("Subtitle laden…")
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, let text = String(data: data, encoding: .utf8) else { return }
-            let cues = VTTParser.parse(text)
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self, error == nil, let data,
+                  let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let text = String(data: data, encoding: .utf8) else {
+                DispatchQueue.main.async { self?.hideLoading() }
+                return
+            }
+            let cues = SubtitleParser.parse(text)
             DispatchQueue.main.async {
                 self.subtitleCues = cues
+                self.subtitleLabel.isHidden = cues.isEmpty
                 self.hideLoading()
                 _ = language
             }
@@ -601,35 +596,32 @@ private struct SubtitleCue {
     let text: String
 }
 
-private enum VTTParser {
+private enum SubtitleParser {
     static func parse(_ source: String) -> [SubtitleCue] {
-        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        let normalized = source.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        let blocks = normalized.components(separatedBy: "\n\n")
         var result: [SubtitleCue] = []
-        var i = 0
-        while i < lines.count {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-            if let arrow = line.range(of: " --> ") {
-                let left = String(line[..<arrow.lowerBound])
-                let right = String(line[arrow.upperBound...]).split(separator: " ").first.map(String.init) ?? ""
-                let start = parseTime(left)
-                let end = parseTime(right)
-                var textLines: [String] = []
-                i += 1
-                while i < lines.count && !lines[i].trimmingCharacters(in: .whitespaces).isEmpty {
-                    textLines.append(lines[i].replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression))
-                    i += 1
-                }
-                if start != nil && end != nil && !textLines.isEmpty { result.append(SubtitleCue(start: start!, end: end!, text: textLines.joined(separator: "\n"))) }
-            }
-            i += 1
+        for block in blocks {
+            let lines = block.components(separatedBy: "\n")
+            guard let timingIndex = lines.firstIndex(where: { $0.contains(" --> ") }) else { continue }
+            let timing = lines[timingIndex]
+            let parts = timing.components(separatedBy: " --> ")
+            guard parts.count >= 2, let start = parseTime(parts[0]), let end = parseTime(parts[1].split(separator: " ").first.map(String.init) ?? parts[1]) else { continue }
+            let text = lines[(timingIndex + 1)...].joined(separator: "\n")
+                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { result.append(SubtitleCue(start: start, end: end, text: text)) }
         }
-        return result
+        return result.sorted { $0.start < $1.start }
     }
 
     static func parseTime(_ value: String) -> Double? {
-        let parts = value.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".").split(separator: ":").map(String.init)
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+        let parts = v.split(separator: ":").map(String.init)
         guard parts.count >= 2 else { return nil }
-        if parts.count == 3 { return (Double(parts[0]) ?? 0) * 3600 + (Double(parts[1]) ?? 0) * 60 + (Double(parts[2]) ?? 0) }
+        if parts.count == 3 {
+            return (Double(parts[0]) ?? 0) * 3600 + (Double(parts[1]) ?? 0) * 60 + (Double(parts[2]) ?? 0)
+        }
         return (Double(parts[0]) ?? 0) * 60 + (Double(parts[1]) ?? 0)
     }
 }
