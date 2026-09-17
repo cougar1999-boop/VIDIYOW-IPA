@@ -12,13 +12,11 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken met Xcode 15 compatibiliteit..."
-# We voegen 'xcodeVersion: "15.0"' toe om file format 77 te omzeilen
+echo "Stap 2: iOS Project configuratie aanmaken..."
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
   bundleIdPrefix: com.sideload
-  xcodeVersion: "15.0"
 targets:
   VIDIYOW:
     type: application
@@ -34,7 +32,11 @@ EOF
 echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: App compileren voor echte iPhone (iOS Device)..."
+echo "Stap 4: Projectformaat handmatig downgraden naar Xcode 15 (objectVersion 60)..."
+# Dit commando zoekt objectVersion = 77 (Xcode 16) op en vervangt het door 60 (Xcode 15)
+sed -i '' 's/objectVersion = 77;/objectVersion = 60;/g' "$ROOT/VIDIYOW.xcodeproj/project.pbxproj" || true
+
+echo "Stap 5: App compileren voor echte iPhone (iOS Device)..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
