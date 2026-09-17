@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -12,22 +12,22 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken (zonder Storyboards)..."
-# We sluiten alle .storyboard bestanden expliciet uit om exit code 65 te voorkomen
+echo "Stap 2: iOS Project configuratie aanmaken (iOS 17.0 & Juiste Bundle ID)..."
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
-  bundleIdPrefix: com.sideload
+  bundleIdPrefix: com.vidiyow
 targets:
   VIDIYOW:
     type: application
     platform: iOS
-    deploymentTarget: "15.0"
+    deploymentTarget: "17.0"
     sources:
       - path: VIDIYOW
         excludes:
           - "**/*.storyboard"
     settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.vidiyow.player
       CODE_SIGNING_ALLOWED: NO
       CODE_SIGNING_REQUIRED: NO
       CODE_SIGN_IDENTITY: ""
