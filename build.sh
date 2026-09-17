@@ -44,13 +44,23 @@ cat << 'EOF' > "$ROOT/VIDIYOW/LaunchScreen.storyboard"
 </document>
 EOF
 
-echo "Stap 2: App compileren via Mac Catalyst (iOS architectuur)..."
-# We gebruiken 'variant=Mac Catalyst' om de iOS-code binnen het macOS-project te activeren
+echo "Stap 2: Projectbestand manipuleren om iOS/iPhone te forceren..."
+# We zoeken in het projectbestand naar de macOS SDK instellingen en vervangen deze door iphoneos
+PBXPROJ="$PROJECT/project.pbxproj"
+if [ -f "$PBXPROJ" ]; then
+  sed -i '' 's/SDKROOT = macosx;/SDKROOT = iphoneos;/g' "$PBXPROJ" || true
+  sed -i '' 's/SUPPORTED_PLATFORMS = "macosx";/SUPPORTED_PLATFORMS = "iphoneos";/g' "$PBXPROJ" || true
+  sed -i '' 's/SUPPORTED_PLATFORMS = macosx;/SUPPORTED_PLATFORMS = iphoneos;/g' "$PBXPROJ" || true
+fi
+
+echo "Stap 3: App compileren voor iOS (Simulator) om herstelde instellingen te testen..."
+# We bouwen nu voor de iphonesimulator SDK om platformcontroles te omzeilen
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -configuration Release \
-  -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+  -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' \
   CONFIGURATION_BUILD_DIR="$EXPORT" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
