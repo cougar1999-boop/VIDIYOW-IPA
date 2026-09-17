@@ -12,32 +12,16 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 1b: Zoeken naar de juiste hoofdmap met bronbestanden..."
+echo "Stap 1b: Zoeken naar de exacte hoofdmap met bronbestanden..."
+# We detecteren dynamisch welke map de Swift-bestanden bevat
 SOURCEMAP="VIDIYOW"
 if [ -d "$ROOT/Vidiyow" ]; then SOURCEMAP="Vidiyow"; fi
 if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
-echo "Bronbestanden gevonden in map: $SOURCEMAP"
+echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
-echo "Stap 2: Swift programmeerfouten in NativePlayerViewController automatisch repareren..."
-FILE="$ROOT/$SOURCEMAP/Player/NativePlayerViewController.swift"
-
-# Herstel 1: De foute Autolayout Constraint fixen met geldige NSLayoutConstraint syntaxis
-if [ -f "$FILE" ]; then
-  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' "$FILE" || true
-  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' "$FILE" || true
-else
-  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' {} + || true
-  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' {} + || true
-fi
-
-# Herstel 2: De ontbrekende AVURLAssetHTTPHeaderFieldsKey repareren naar een String key
-if [ -f "$FILE" ]; then
-  sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' "$FILE" || true
-else
-  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' {} + || true
-fi
-
-echo "Stap 3: iOS Project configuratie aanmaken..."
+echo "Stap 2: Xcode Project configuratie aanmaken..."
+# We configureren XcodeGen nu clean. We sluiten storyboards en Info.plist uit 
+# om dubbele resource-conflicten te voorkomen, en laten Xcode de plist genereren.
 cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -64,10 +48,10 @@ targets:
       SWIFT_STRICT_CONCURRENCY: minimal
 EOF
 
-echo "Stap 4: Schoon Xcode project genereren..."
+echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 5: App archiveren voor echte iPhone..."
+echo "Stap 4: App archiveren voor echte iPhone..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -81,17 +65,16 @@ xcodebuild \
   SWIFT_STRICT_CONCURRENCY=minimal \
   archive
 
-echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
+echo "Stap 5: Geldige IPA-structuur handmatig samenstellen..."
 rm -rf "$EXPORT"
 mkdir -p "$EXPORT/Payload"
 
 # Kopieer de .app vanuit het gemaakte archief naar de Payload-map
 cp -r "$ROOT/build/VIDIYOW.xcarchive/Products/Applications/VIDIYOW.app" "$EXPORT/Payload/"
 
-echo "Stap 6b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
+echo "Stap 5b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
 if [ ! -f "$EXPORT/Payload/VIDIYOW.app/VIDIYOW" ]; then
   echo "CRITIEKE FOUT: Het uitvoerbare bestand 'VIDIYOW' is niet gegenereerd in de .app map!"
-  echo "Controleer de Xcode build logs hierboven om te zien waarom er geen code is gecompileerd."
   exit 1
 fi
 
