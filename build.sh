@@ -12,15 +12,24 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
+echo "Stap 1b: Zoeken naar de juiste hoofdmap met bronbestanden..."
+# We zoeken automatisch of de map VIDIYOW, Vidiyow of vidiyow heet
+SOURCEMAP="VIDIYOW"
+if [ -d "$ROOT/Vidiyow" ]; then SOURCEMAP="Vidiyow"; fi
+if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
+echo "Bronbestanden gevonden in map: $SOURCEMAP"
+
 echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
-# We vervangen de foutieve 'multiplier: 0.22' door een geldige 'constant: 22' om de UIKit crash te herstellen
-FILE="$ROOT/VIDIYOW/Player/NativePlayerViewController.swift"
+FILE="$ROOT/$SOURCEMAP/Player/NativePlayerViewController.swift"
 if [ -f "$FILE" ]; then
   sed -i '' 's/multiplier: 0.22/constant: 22/g' "$FILE" || true
+else
+  # Als de mapstructuur anders is, herstel het bestand overal waar het staat
+  find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/multiplier: 0.22/constant: 22/g' {} + || true
 fi
 
 echo "Stap 3: iOS Project configuratie aanmaken..."
-cat << 'EOF' > "$ROOT/project.yml"
+cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
   bundleIdPrefix: com.vidiyow
@@ -30,7 +39,7 @@ targets:
     platform: iOS
     deploymentTarget: "17.0"
     sources:
-      - path: VIDIYOW
+      - path: $SOURCEMAP
         excludes:
           - "**/*.storyboard"
     settings:
@@ -45,7 +54,6 @@ echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
 echo "Stap 5: App archiveren voor echte iPhone..."
-# We maken een officieel Xcode archief aan om de executable te garanderen
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -60,20 +68,26 @@ xcodebuild \
   archive
 
 echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
-# Zorg dat de exportmap en Payload-map volledig schoon zijn
 rm -rf "$EXPORT"
 mkdir -p "$EXPORT/Payload"
 
-# Kopieer de ALTIJD complete .app vanuit het gemaakte archief naar de Payload-map
+# Kopieer de .app vanuit het gemaakte archief naar de Payload-map
 cp -r "$ROOT/build/VIDIYOW.xcarchive/Products/Applications/VIDIYOW.app" "$EXPORT/Payload/"
+
+echo "Stap 6b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
+if [ ! -f "$EXPORT/Payload/VIDIYOW.app/VIDIYOW" ]; then
+  echo "CRITIEKE FOUT: Het uitvoerbare bestand 'VIDIYOW' is niet gegenereerd in de .app map!"
+  echo "Controleer de Xcode build logs hierboven om te zien waarom er geen code is gecompileerd."
+  exit 1
+fi
 
 # Ga fysiek naar de exportmap om foutieve paden in de zip te voorkomen
 cd "$EXPORT"
 
-# We zippen en sluiten onzichtbare macOS-bestanden (zoals UT en .DS_Store) expliciet uit
+# Zippen zonder macOS-systeembestanden
 zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
 
-# Ruim de losse Payload-map en het xcarchive-pakket netjes op
+# Ruim de tijdelijke mappen netjes op
 rm -rf "Payload"
 rm -rf "$ROOT/build/VIDIYOW.xcarchive"
 
