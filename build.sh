@@ -19,12 +19,15 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfouten in NativePlayerViewController automatisch repareren..."
-# We herstellen de layout-fout op de enige syntactisch geldige manier in UIKit/Swift
-find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' {} + || true
-find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' {} + || true
-
-# We herstellen de ontbrekende AVURLAssetHTTPHeaderFieldsKey scope-fout naar een String-key
-find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' {} + || true
+# We zoeken het bestand op en voeren de vervangingen uit via een gegarandeerd werkende lus op macOS
+find "$ROOT" -name "NativePlayerViewController.swift" | while read -r FILE; do
+  echo "Reparatie toepassen op: $FILE"
+  # Herstel Autolayout Constraint
+  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' "$FILE" || true
+  sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' "$FILE" || true
+  # Herstel AVURLAssetHTTPHeaderFieldsKey scope-fout
+  sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' "$FILE" || true
+done
 
 echo "Stap 3: Xcode Project configuratie aanmaken..."
 cat << EOF > "$ROOT/project.yml"
