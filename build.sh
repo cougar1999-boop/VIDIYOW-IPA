@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EXPORT="$ROOT/build/export"
 
-# Installeer XcodeGen op de GitHub Mac-server via Homebrew
 echo "Stap 1: XcodeGen installeren..."
 if ! command -v xcodegen >/dev/null 2>&1; then
   brew install xcodegen
@@ -13,12 +12,13 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken..."
-# We schrijven een configuratiebestand dat een puur iOS (iPhone/iPad) project afdwingt
+echo "Stap 2: iOS Project configuratie aanmaken met Xcode 15 compatibiliteit..."
+# We voegen 'xcodeVersion: "15.0"' toe om file format 77 te omzeilen
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
   bundleIdPrefix: com.sideload
+  xcodeVersion: "15.0"
 targets:
   VIDIYOW:
     type: application
