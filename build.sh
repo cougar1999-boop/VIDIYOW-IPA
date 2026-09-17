@@ -43,6 +43,8 @@ targets:
         excludes:
           - "**/*.storyboard"
           - "**/Info.plist"
+    info:
+      path: $SOURCEMAP/App/Info.plist
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.vidiyow.player
       CODE_SIGNING_ALLOWED: NO
