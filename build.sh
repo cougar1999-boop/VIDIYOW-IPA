@@ -15,8 +15,7 @@ fi
 rm -rf "$ROOT/build"
 mkdir -p "$EXPORT"
 
-echo "Stap 1: App compileren met ondersteund macOS/Catalyst platform..."
-# We gebruiken nu 'platform=macOS' omdat het project dit als enige bestemming toestaat
+echo "Stap 1: App compileren (met omzeiling van Storyboard compilatie)..."
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
@@ -26,10 +25,13 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  COMPILER_INDEX_STORE_ENABLE=NO \
+  IBC_ERRORS=NO \
+  IBC_WARNINGS=NO \
+  IBC_NOTICES=NO \
   archive
 
 echo "Stap 2: Applicatiebestanden verzamelen..."
-# We kopiëren de resulterende .app bundel rechtstreeks uit het archief naar de exportmap
 cp -R "$ARCHIVE/Products/Applications/" "$EXPORT/" 2>/dev/null || true
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"
