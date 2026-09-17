@@ -80,6 +80,7 @@ final class NativePlayerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        configureAudioSession()
         view.backgroundColor = .black
         setupUI()
         resumePosition = isVOD ? loadResume() : 0
@@ -248,6 +249,16 @@ final class NativePlayerViewController: UIViewController {
         return streamURL
     }
 
+    private func configureAudioSession() {
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
+            try session.setActive(true, options: [])
+        } catch {
+            print("VIDIYOW audio session setup failed: \(error)")
+        }
+    }
+
     private func configurePlayer() {
         activePlaybackURL = initialPlaybackURL()
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
@@ -255,6 +266,8 @@ final class NativePlayerViewController: UIViewController {
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: item)
+        player.isMuted = false
+        player.volume = 1.0
         player.actionAtItemEnd = .pause
 
         playerLayer = AVPlayerLayer(player: player)
@@ -471,6 +484,8 @@ final class NativePlayerViewController: UIViewController {
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
         player?.replaceCurrentItem(with: item)
+        player?.isMuted = false
+        player?.volume = 1.0
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
             if item.status == .readyToPlay {
