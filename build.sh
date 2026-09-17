@@ -14,6 +14,7 @@ fi
 
 rm -rf "$ROOT/build"
 mkdir -p "$EXPORT"
+find . -name "LaunchScreen.storyboard" -exec rm {} \;
 
 echo "Stap 1: App compileren (met omzeiling van Storyboard compilatie)..."
 xcodebuild \
