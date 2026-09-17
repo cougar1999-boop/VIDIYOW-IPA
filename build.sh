@@ -13,15 +13,20 @@ rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
 echo "Stap 1b: Zoeken naar de exacte hoofdmap met bronbestanden..."
-# We detecteren dynamisch welke map de Swift-bestanden bevat
 SOURCEMAP="VIDIYOW"
 if [ -d "$ROOT/Vidiyow" ]; then SOURCEMAP="Vidiyow"; fi
 if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
-echo "Stap 2: Xcode Project configuratie aanmaken..."
-# We configureren XcodeGen nu clean. We sluiten storyboards en Info.plist uit 
-# om dubbele resource-conflicten te voorkomen, en laten Xcode de plist genereren.
+echo "Stap 2: Swift programmeerfouten in NativePlayerViewController automatisch repareren..."
+# We herstellen de layout-fout op de enige syntactisch geldige manier in UIKit/Swift
+find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)/g' {} + || true
+find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)/NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)/g' {} + || true
+
+# We herstellen de ontbrekende AVURLAssetHTTPHeaderFieldsKey scope-fout naar een String-key
+find "$ROOT" -name "NativePlayerViewController.swift" -exec sed -i '' 's/AVURLAssetHTTPHeaderFieldsKey/"AVURLAssetHTTPHeaderFieldsKey"/g' {} + || true
+
+echo "Stap 3: Xcode Project configuratie aanmaken..."
 cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -48,10 +53,10 @@ targets:
       SWIFT_STRICT_CONCURRENCY: minimal
 EOF
 
-echo "Stap 3: Schoon Xcode project genereren..."
+echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: App archiveren voor echte iPhone..."
+echo "Stap 5: App archiveren voor echte iPhone..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -65,14 +70,14 @@ xcodebuild \
   SWIFT_STRICT_CONCURRENCY=minimal \
   archive
 
-echo "Stap 5: Geldige IPA-structuur handmatig samenstellen..."
+echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
 rm -rf "$EXPORT"
 mkdir -p "$EXPORT/Payload"
 
 # Kopieer de .app vanuit het gemaakte archief naar de Payload-map
 cp -r "$ROOT/build/VIDIYOW.xcarchive/Products/Applications/VIDIYOW.app" "$EXPORT/Payload/"
 
-echo "Stap 5b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
+echo "Stap 6b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
 if [ ! -f "$EXPORT/Payload/VIDIYOW.app/VIDIYOW" ]; then
   echo "CRITIEKE FOUT: Het uitvoerbare bestand 'VIDIYOW' is niet gegenereerd in de .app map!"
   exit 1
