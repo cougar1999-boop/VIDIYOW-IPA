@@ -71,6 +71,22 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
                     window.VidiyowNativePlayer.playVod(String(url || ''), JSON.stringify(meta));
                     return Promise.resolve();
                   }
+
+                  // Compatibility fallback for webplayer builds that route Stalker
+                  // Live TV through start() instead of calling NovaNativePlayer directly.
+                  var sourceType = String((source && (source.type || source.kind)) || '').toLowerCase();
+                  if (type === 'live' && sourceType === 'stalker' && window.VidiyowNativePlayer) {
+                    var liveMeta = {
+                      title: String((item && (item.name || item.title)) || 'Live TV'),
+                      media_type: 'live',
+                      channel_id: String((item && item.id) || ''),
+                      portal: String((source && (source.portal || source.server)) || ''),
+                      server: String((source && source.server) || ''),
+                      user_agent: \(jsQuote(VIDIYOWConstants.defaultUserAgent))
+                    };
+                    window.VidiyowNativePlayer.playStalker(String(url || ''), JSON.stringify(liveMeta));
+                    return Promise.resolve();
+                  }
                 } catch(e) { console.error('VIDIYOW native VOD bridge', e); }
                 return original.apply(this, arguments);
               }

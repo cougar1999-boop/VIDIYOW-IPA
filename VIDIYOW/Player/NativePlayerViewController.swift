@@ -203,9 +203,10 @@ final class NativePlayerViewController: UIViewController {
 
     private func configurePlayer() {
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
-        let asset = AVURLAsset(url: streamURL, options: options)
+        let asset = makeAsset()
         let item = AVPlayerItem(asset: asset)
+        // Keep the same short startup buffer philosophy as the Android Media3 player.
+        item.preferredForwardBufferDuration = isVOD ? 5.0 : 3.0
         player = AVPlayer(playerItem: item)
         player.actionAtItemEnd = .pause
 
@@ -391,7 +392,10 @@ final class NativePlayerViewController: UIViewController {
 
     private func recoverPlayback() {
         if isVOD {
-            guard vodRetryCount < 6 else { return }
+            guard vodRetryCount < 6 else {
+                hideLoading()
+                return
+            }
             vodRetryCount += 1
             let position = max(player?.currentTime().seconds ?? 0, loadResume())
             saveResume(position)
@@ -401,7 +405,10 @@ final class NativePlayerViewController: UIViewController {
             }
         } else {
             let now = Date()
-            guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else { return }
+            guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else {
+                if liveRecoveryCount >= 2 { hideLoading() }
+                return
+            }
             liveRecoveryCount += 1
             lastLiveRecoveryAt = now
             showLoading("Live stream herstellen…")
@@ -409,13 +416,34 @@ final class NativePlayerViewController: UIViewController {
         }
     }
 
+    private func makeAsset() -> AVURLAsset {
+        var headers: [String: String] = [
+            "Accept": "*/*",
+            "User-Agent": userAgent
+        ]
+
+        // Stalker/Xtream servers frequently require the portal as Referer.
+        // Android's working Media3 player sends this header on every request.
+        if !referer.isEmpty {
+            headers["Referer"] = referer
+        }
+
+        let options: [String: Any] = [
+            AVURLAssetHTTPUserAgentKey: userAgent,
+            AVURLAssetHTTPHeaderFieldsKey: headers,
+            AVURLAssetAllowsCellularAccessKey: true
+        ]
+
+        return AVURLAsset(url: streamURL, options: options)
+    }
+
     private func recreatePlayer(at position: Double) {
         guard !isBeingDismissed else { return }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
-        let asset = AVURLAsset(url: streamURL, options: options)
+        let asset = makeAsset()
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isVOD ? 5.0 : 3.0
         player?.replaceCurrentItem(with: item)
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
