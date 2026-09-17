@@ -9,7 +9,8 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   brew install xcodegen
 fi
 
-rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
+# We gooien alle oude xcode-resten grondig weg voor de start
+rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj" "$ROOT/Payload" "$ROOT/Payload.ipa"
 mkdir -p "$EXPORT"
 
 echo "Stap 1b: Zoeken naar de exacte hoofdmap met bronbestanden..."
@@ -19,6 +20,8 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Xcode Project configuratie aanmaken..."
+# We sluiten nu expliciet alle oude Payload, zip en build mappen uit, 
+# mochten deze per ongeluk in de repository zijn geüpload.
 cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -33,6 +36,9 @@ targets:
         excludes:
           - "**/*.storyboard"
           - "**/Info.plist"
+          - "**/Payload/**"
+          - "**/build/**"
+          - "**/*.ipa"
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.vidiyow.player
       GENERATE_INFOPLIST_FILE: YES
@@ -48,8 +54,7 @@ EOF
 echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: App compileren (oude methode) naar de exportmap..."
-# Deze methode staat fouten in de Swift-code toe zonder de hele GitHub Actions-run direct te crashen
+echo "Stap 4: App compileren (oude flexibele methode)..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -63,21 +68,26 @@ xcodebuild \
   SWIFT_STRICT_CONCURRENCY=minimal \
   build || true
 
-echo "Stap 5: IPA-structuur forceren (Payload)..."
-# We verpakken de bestanden handmatig in de Payload-structuur, exact zoals in uw allereerste werkende opzet
-cd "$EXPORT"
-mkdir -p Payload
+echo "Stap 5: IPA-structuur gegarandeerd schoon opbouwen..."
+rm -rf "$EXPORT/Payload"
+mkdir -p "$EXPORT/Payload"
 
-if [ -d "VIDIYOW.app" ]; then
-  mv "VIDIYOW.app" Payload/
+if [ -d "$EXPORT/VIDIYOW.app" ]; then
+  mv "$EXPORT/VIDIYOW.app" "$EXPORT/Payload/"
 else
-  # Als Xcode losse bestanden heeft gedumpt, herstellen we de app-map handmatig om Sideloadly te foppen
-  mkdir -p Payload/VIDIYOW.app
-  find . -maxdepth 1 -not -name "Payload" -not -name "." -exec mv {} Payload/VIDIYOW.app/ \;
+  mkdir -p "$EXPORT/Payload/VIDIYOW.app"
+  find "$EXPORT" -maxdepth 1 -not -name "Payload" -not -name "export" -not -name "." -not -name ".." -exec mv {} "$EXPORT/Payload/VIDIYOW.app/" \;
 fi
 
-# Zippen naar IPA en tijdelijke Payload opruimen
+# Verwijder eventuele geneste Payload-mappen die per ongeluk zijn meegekopieerd uit de bronbestanden
+rm -rf "$EXPORT/Payload/VIDIYOW.app/Payload"
+rm -rf "$EXPORT/Payload/VIDIYOW.app/PK Payload"
+
+# Ga fysiek naar de exportmap en zip de boel zonder macOS-systeembestanden
+cd "$EXPORT"
 zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
+
+# Ruim op
 rm -rf "Payload"
 
-echo "Build voltooid! Uw IPA staat klaar in: $EXPORT/VIDIYOW.ipa"
+echo "Build voltooid! Uw IPA staat schoon klaar in: $EXPORT/VIDIYOW.ipa"
