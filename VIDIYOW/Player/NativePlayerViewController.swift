@@ -147,7 +147,7 @@ final class NativePlayerViewController: UIViewController {
             loadingLabel.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 18),
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 45),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -45),
-            subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)
+            NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true
         ])
 
         controls.translatesAutoresizingMaskIntoConstraints = false
@@ -434,7 +434,7 @@ final class NativePlayerViewController: UIViewController {
         player?.replaceCurrentItem(with: nil)
         let options: [String: Any] = [
             AVURLAssetHTTPUserAgentKey: userAgent,
-            AVURLAssetHTTPHeaderFieldsKey: ["Accept": "*/*", "User-Agent": userAgent, "Referer": referer].filter { !$0.value.isEmpty }
+            "AVURLAssetHTTPHeaderFieldsKey": ["Accept": "*/*", "User-Agent": userAgent, "Referer": referer].filter { !$0.value.isEmpty }
         ]
         let asset = AVURLAsset(url: streamURL, options: options)
         let item = AVPlayerItem(asset: asset)
