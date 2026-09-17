@@ -12,7 +12,14 @@ fi
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
 
-echo "Stap 2: iOS Project configuratie aanmaken (iOS 17.0 & Concurrency-fix)..."
+echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
+# We vervangen de foutieve 'multiplier: 0.22' door een geldige 'constant: 22' om de UIKit crash te herstellen
+FILE="$ROOT/VIDIYOW/Player/NativePlayerViewController.swift"
+if [ -f "$FILE" ]; then
+  sed -i '' 's/multiplier: 0.22/constant: 22/g' "$FILE" || true
+fi
+
+echo "Stap 3: iOS Project configuratie aanmaken..."
 cat << 'EOF' > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -34,12 +41,10 @@ targets:
       SWIFT_STRICT_CONCURRENCY: minimal
 EOF
 
-echo "Stap 3: Schoon Xcode project genereren..."
+echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
-# NOTA: De sed-downgrade (objectVersion) is hier weggelaten omdat Xcode 16 dit formaat ondersteunt.
-
-echo "Stap 4: App compileren voor echte iPhone (via Xcode 16)..."
+echo "Stap 5: App compileren voor echte iPhone..."
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
