@@ -15,7 +15,7 @@ fi
 rm -rf "$ROOT/build"
 mkdir -p "$EXPORT"
 
-# Archive stap: we dwingen Xcode om signing over te slaan
+echo "Stap 1: App compileren en archiveren..."
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
@@ -27,27 +27,8 @@ xcodebuild \
   CODE_SIGN_IDENTITY="" \
   archive
 
-# ExportOptions.plist: aangepast voor ad-hoc/development zonder certificaten
-cat > "$ROOT/build/ExportOptions.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>development</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>compileBitcode</key><false/>
-  <key>destination</key><string>export</string>
-</dict></plist>
-PLIST
+echo "Stap 2: .app bestand kopiëren voor sideloading..."
+# We halen de gecompileerde app rechtstreeks uit het archief en zetten hem in de export map
+cp -R "$ARCHIVE/Products/Applications/" "$EXPORT/"
 
-# Export stap: we exporteren de ongetekende app
-xcodebuild \
-  -exportArchive \
-  -archivePath "$ARCHIVE" \
-  -exportOptionsPlist "$ROOT/build/ExportOptions.plist" \
-  -exportPath "$EXPORT" \
-  CODE_SIGNING_ALLOWED=NO \
-  CODE_SIGNING_REQUIRED=NO \
-  CODE_SIGN_IDENTITY=""
-
-echo
 echo "Build voltooid! De bestanden staan in: $EXPORT"
