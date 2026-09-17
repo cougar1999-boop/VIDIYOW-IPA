@@ -19,8 +19,6 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gevonden in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
-# We herstellen de constraint-fout door de multiplier op 1.0 te zetten en de gewenste waarde via de constant toe te voegen.
-# Dit is de enige syntactisch geldige manier in Swift om een UIKit-crash te voorkomen.
 FILE="$ROOT/$SOURCEMAP/Player/NativePlayerViewController.swift"
 if [ -f "$FILE" ]; then
   sed -i '' 's/multiplier: 0.22/multiplier: 1.0, constant: 22/g' "$FILE" || true
@@ -29,6 +27,8 @@ else
 fi
 
 echo "Stap 3: iOS Project configuratie aanmaken..."
+# We vertellen XcodeGen nu geforceerd om GEEN Info.plist te linken vanuit de resources, 
+# maar deze door Xcode zelf te laten genereren op basis van de target settings.
 cat << EOF > "$ROOT/project.yml"
 name: VIDIYOW
 options:
@@ -43,10 +43,12 @@ targets:
         excludes:
           - "**/*.storyboard"
           - "**/Info.plist"
-    info:
-      path: $SOURCEMAP/App/Info.plist
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.vidiyow.player
+      GENERATE_INFOPLIST_FILE: YES
+      INFOPLIST_KEY_CFBundleCFBundleShortVersionString: "1.0"
+      INFOPLIST_KEY_CFBundleVersion: "1"
+      INFOPLIST_KEY_UILaunchScreen_StoryboardName: ""
       CODE_SIGNING_ALLOWED: NO
       CODE_SIGNING_REQUIRED: NO
       CODE_SIGN_IDENTITY: ""
