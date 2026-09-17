@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EXPORT="$ROOT/build/export"
+TEMP_BUILD="$ROOT/build/temp"
 
 echo "Stap 1: XcodeGen installeren..."
 if ! command -v xcodegen >/dev/null 2>&1; then
@@ -11,6 +12,7 @@ fi
 
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
+mkdir -p "$TEMP_BUILD"
 
 echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
 # We vervangen de foutieve 'multiplier: 0.22' door een geldige 'constant: 22' om de UIKit crash te herstellen
@@ -51,11 +53,26 @@ xcodebuild \
   -configuration Release \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
-  CONFIGURATION_BUILD_DIR="$EXPORT" \
+  CONFIGURATION_BUILD_DIR="$TEMP_BUILD" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
   SWIFT_STRICT_CONCURRENCY=minimal \
   build
 
-echo "Build voltooid! De bestanden staan in: $EXPORT"
+echo "Stap 6: Geldige IPA-structuur aanmaken en inpakken..."
+# Maak de verplichte Payload-map aan binnen de export-map
+mkdir -p "$EXPORT/Payload"
+
+# Kopieer de gecompileerde .app-bundel naar de Payload-map
+cp -r "$TEMP_BUILD/VIDIYOW.app" "$EXPORT/Payload/"
+
+# Ga naar de exportmap om de Payload-map te zippen naar een .ipa-bestand
+cd "$EXPORT"
+zip -r "VIDIYOW.ipa" "Payload"
+
+# Ruim de tijdelijke mappen op zodat alleen het .ipa-bestand overblijft voor GitHub Artifacts
+rm -rf "Payload"
+rm -rf "$TEMP_BUILD"
+
+echo "Build voltooid! Uw geldige IPA staat klaar in: $EXPORT/VIDIYOW.ipa"
