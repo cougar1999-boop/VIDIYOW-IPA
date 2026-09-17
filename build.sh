@@ -14,8 +14,7 @@ fi
 rm -rf "$ROOT/build"
 mkdir -p "$EXPORT"
 
-echo "Stap 1: Corrupte storyboard repareren met een schone, lege iOS-versie..."
-# We zoeken de LaunchScreen.storyboard op en overschrijven deze met een geldige, minimale XML
+echo "Stap 1: Storyboard-bestanden herstellen..."
 cat << 'EOF' > "$ROOT/VIDIYOW/LaunchScreen.storyboard"
 <?xml version="1.0" encoding="UTF-8"?>
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="21507" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
@@ -45,20 +44,18 @@ cat << 'EOF' > "$ROOT/VIDIYOW/LaunchScreen.storyboard"
 </document>
 EOF
 
-echo "Stap 2: Compileren voor een échte iPhone (iOS Device)..."
-# We zetten SDK op iphoneos en dwingen de target-devices naar iPhone/iPad via de build-settings
+echo "Stap 2: App compileren via Mac Catalyst (iOS architectuur)..."
+# We gebruiken 'variant=Mac Catalyst' om de iOS-code binnen het macOS-project te activeren
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -configuration Release \
-  -sdk iphoneos \
-  -destination 'generic/platform=iOS' \
+  -destination 'generic/platform=macOS,variant=Mac Catalyst' \
   CONFIGURATION_BUILD_DIR="$EXPORT" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
   COMPILER_INDEX_STORE_ENABLE=NO \
-  TARGETED_DEVICE_FAMILY="1,2" \
   build
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"
