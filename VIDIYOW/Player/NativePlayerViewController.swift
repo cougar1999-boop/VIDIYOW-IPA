@@ -9,6 +9,13 @@ final class NativePlayerViewController: UIViewController {
     private let portal: String
     private let referer: String
     private let userAgent: String
+    private let sourceType: String
+    private let sessionId: String
+    private let mac: String
+    private let model: String
+    private let fallbackURL: URL?
+    private var activePlaybackURL: URL
+    private var usedFallback = false
 
     private var player: AVPlayer!
     private var playerLayer: AVPlayerLayer!
@@ -43,7 +50,7 @@ final class NativePlayerViewController: UIViewController {
     private var controlsTimer: Timer?
     private var isSeeking = false
 
-    init(url: String, title: String, mediaType: String, year: String, portal: String, referer: String, userAgent: String) {
+    init(url: String, title: String, mediaType: String, year: String, portal: String, referer: String, userAgent: String, sourceType: String = "", sessionId: String = "", mac: String = "", model: String = "MAG254") {
         self.streamURL = URL(string: url) ?? URL(string: "about:blank")!
         self.mediaTitle = title
         self.mediaType = mediaType
@@ -51,6 +58,12 @@ final class NativePlayerViewController: UIViewController {
         self.portal = portal
         self.referer = referer
         self.userAgent = userAgent.isEmpty ? VIDIYOWConstants.defaultUserAgent : userAgent
+        self.sourceType = sourceType.lowercased()
+        self.sessionId = sessionId
+        self.mac = mac
+        self.model = model.isEmpty ? "MAG254" : model
+        self.activePlaybackURL = self.streamURL
+        self.fallbackURL = NativePlayerViewController.makeVodProxyURL(original: self.streamURL, referer: referer, mediaType: mediaType)
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -201,12 +214,46 @@ final class NativePlayerViewController: UIViewController {
         button.heightAnchor.constraint(equalToConstant: 34).isActive = true
     }
 
+    private static func makeVodProxyURL(original: URL, referer: String, mediaType: String) -> URL? {
+        guard mediaType == "movie" || mediaType == "episode" else { return nil }
+        var c = URLComponents(string: "https://vod.vidiyow.com/vod.php")
+        var q: [URLQueryItem] = [
+            URLQueryItem(name: "url", value: original.absoluteString),
+            URLQueryItem(name: "vod", value: "1")
+        ]
+        let lower = original.absoluteString.lowercased()
+        if let dot = lower.lastIndex(of: ".") {
+            let ext = lower[lower.index(after: dot)...].split(whereSeparator: { $0 == "?" || $0 == "#" }).first.map(String.init) ?? ""
+            if !ext.isEmpty && ext.count <= 8 { q.append(URLQueryItem(name: "ext", value: ext)) }
+        }
+        if !referer.isEmpty { q.append(URLQueryItem(name: "referer", value: referer)) }
+        c?.queryItems = q
+        return c?.url
+    }
+
+    private func makeStalkerHLSURL() -> URL? {
+        guard sourceType == "stalker", !streamURL.absoluteString.lowercased().contains(".m3u8") else { return nil }
+        var c = URLComponents(string: "https://vidiyow.com/api/stalker-hls.php")
+        var q = [URLQueryItem(name: "url", value: streamURL.absoluteString)]
+        if !sessionId.isEmpty { q.append(URLQueryItem(name: "sid", value: sessionId)) }
+        if !portal.isEmpty { q.append(URLQueryItem(name: "portal", value: portal)) }
+        if !mac.isEmpty { q.append(URLQueryItem(name: "mac", value: mac)) }
+        if !model.isEmpty { q.append(URLQueryItem(name: "model", value: model)) }
+        c?.queryItems = q
+        return c?.url
+    }
+
+    private func initialPlaybackURL() -> URL {
+        if let hls = makeStalkerHLSURL() { return hls }
+        return streamURL
+    }
+
     private func configurePlayer() {
+        activePlaybackURL = initialPlaybackURL()
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-        let asset = makeAsset()
+        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
+        let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        // Keep the same short startup buffer philosophy as the Android Media3 player.
-        item.preferredForwardBufferDuration = isVOD ? 5.0 : 3.0
         player = AVPlayer(playerItem: item)
         player.actionAtItemEnd = .pause
 
@@ -229,7 +276,13 @@ final class NativePlayerViewController: UIViewController {
                     }
                 } else if item.status == .failed {
                     if self.isVOD { self.saveResume(self.player?.currentTime().seconds ?? 0) }
-                    self.recoverPlayback()
+                    if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
+                        self.usedFallback = true
+                        self.activePlaybackURL = fallback
+                        self.recreatePlayer(at: self.player?.currentTime().seconds ?? 0)
+                    } else {
+                        self.recoverPlayback()
+                    }
                 }
             }
         }
@@ -392,10 +445,7 @@ final class NativePlayerViewController: UIViewController {
 
     private func recoverPlayback() {
         if isVOD {
-            guard vodRetryCount < 6 else {
-                hideLoading()
-                return
-            }
+            guard vodRetryCount < 6 else { return }
             vodRetryCount += 1
             let position = max(player?.currentTime().seconds ?? 0, loadResume())
             saveResume(position)
@@ -405,10 +455,7 @@ final class NativePlayerViewController: UIViewController {
             }
         } else {
             let now = Date()
-            guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else {
-                if liveRecoveryCount >= 2 { hideLoading() }
-                return
-            }
+            guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else { return }
             liveRecoveryCount += 1
             lastLiveRecoveryAt = now
             showLoading("Live stream herstellen…")
@@ -416,34 +463,13 @@ final class NativePlayerViewController: UIViewController {
         }
     }
 
-    private func makeAsset() -> AVURLAsset {
-        var headers: [String: String] = [
-            "Accept": "*/*",
-            "User-Agent": userAgent
-        ]
-
-        // Stalker/Xtream servers frequently require the portal as Referer.
-        // Android's working Media3 player sends this header on every request.
-        if !referer.isEmpty {
-            headers["Referer"] = referer
-        }
-
-        let options: [String: Any] = [
-            AVURLAssetHTTPUserAgentKey: userAgent,
-            AVURLAssetHTTPHeaderFieldsKey: headers,
-            AVURLAssetAllowsCellularAccessKey: true
-        ]
-
-        return AVURLAsset(url: streamURL, options: options)
-    }
-
     private func recreatePlayer(at position: Double) {
         guard !isBeingDismissed else { return }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
-        let asset = makeAsset()
+        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
+        let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 5.0 : 3.0
         player?.replaceCurrentItem(with: item)
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -451,7 +477,15 @@ final class NativePlayerViewController: UIViewController {
                 if self.isVOD && position > 0 { self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
                 self.hideLoading()
                 self.player?.play()
-            } else if item.status == .failed { self.recoverPlayback() }
+            } else if item.status == .failed {
+                if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
+                    self.usedFallback = true
+                    self.activePlaybackURL = fallback
+                    self.recreatePlayer(at: position)
+                } else {
+                    self.recoverPlayback()
+                }
+            }
         }
     }
 
