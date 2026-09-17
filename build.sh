@@ -48,8 +48,8 @@ EOF
 echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: App compileren (oude flexibele methode)..."
-# Staat code-fouten toe zonder dat GitHub Actions direct crasht
+echo "Stap 4: App compileren (oude methode) naar de exportmap..."
+# Deze methode staat fouten in de Swift-code toe zonder de hele GitHub Actions-run direct te crashen
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -63,25 +63,21 @@ xcodebuild \
   SWIFT_STRICT_CONCURRENCY=minimal \
   build || true
 
-echo "Stap 5: IPA-structuur gegarandeerd schoon opbouwen..."
-# We ruimen EERST een eventueel oude Payload-map op om de 'vector too long' fout te voorkomen!
-rm -rf "$EXPORT/Payload"
-mkdir -p "$EXPORT/Payload"
+echo "Stap 5: IPA-structuur forceren (Payload)..."
+# We verpakken de bestanden handmatig in de Payload-structuur, exact zoals in uw allereerste werkende opzet
+cd "$EXPORT"
+mkdir -p Payload
 
-# Controleer of Xcode een geldige .app heeft achtergelaten
-if [ -d "$EXPORT/VIDIYOW.app" ]; then
-  mv "$EXPORT/VIDIYOW.app" "$EXPORT/Payload/"
+if [ -d "VIDIYOW.app" ]; then
+  mv "VIDIYOW.app" Payload/
 else
-  # Als Xcode door fouten losse bestanden heeft gedumpt, pakken we ze hier netjes in
-  mkdir -p "$EXPORT/Payload/VIDIYOW.app"
-  find "$EXPORT" -maxdepth 1 -not -name "Payload" -not -name "export" -not -name "." -not -name ".." -exec mv {} "$EXPORT/Payload/VIDIYOW.app/" \;
+  # Als Xcode losse bestanden heeft gedumpt, herstellen we de app-map handmatig om Sideloadly te foppen
+  mkdir -p Payload/VIDIYOW.app
+  find . -maxdepth 1 -not -name "Payload" -not -name "." -exec mv {} Payload/VIDIYOW.app/ \;
 fi
 
-# Ga fysiek naar de exportmap en zip de boel zonder macOS-systeembestanden
-cd "$EXPORT"
+# Zippen naar IPA en tijdelijke Payload opruimen
 zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
-
-# Ruim de losse Payload-map op zodat deze bij een volgende run niet dubbel wordt ingepakt
 rm -rf "Payload"
 
-echo "Build voltooid! Uw IPA staat schoon klaar in: $EXPORT/VIDIYOW.ipa"
+echo "Build voltooid! Uw IPA staat klaar in: $EXPORT/VIDIYOW.ipa"
