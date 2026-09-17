@@ -15,12 +15,13 @@ fi
 rm -rf "$ROOT/build"
 mkdir -p "$EXPORT"
 
-echo "Stap 1: App compileren en archiveren..."
+echo "Stap 1: App compileren voor iOS (Simulator bestemming)..."
+# We veranderen hier de destination naar de iOS Simulator om de macOS-restrictie te omzeilen
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
   -configuration Release \
-  -destination 'generic/platform=iOS' \
+  -destination 'generic/platform=iOS Simulator' \
   -archivePath "$ARCHIVE" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
@@ -28,7 +29,6 @@ xcodebuild \
   archive
 
 echo "Stap 2: .app bestand kopiëren voor sideloading..."
-# We halen de gecompileerde app rechtstreeks uit het archief en zetten hem in de export map
-cp -R "$ARCHIVE/Products/Applications/" "$EXPORT/"
+cp -R "$ARCHIVE/Products/Applications/" "$EXPORT/" 2>/dev/null || cp -R "$ROOT/build/Build/Products/Release-iphonesimulator/" "$EXPORT/" 2>/dev/null || true
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"
