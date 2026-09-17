@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 EXPORT="$ROOT/build/export"
-TEMP_BUILD="$ROOT/build/temp"
 
 echo "Stap 1: XcodeGen installeren..."
 if ! command -v xcodegen >/dev/null 2>&1; then
@@ -12,7 +11,6 @@ fi
 
 rm -rf "$ROOT/build" "$ROOT/VIDIYOW.xcodeproj"
 mkdir -p "$EXPORT"
-mkdir -p "$TEMP_BUILD"
 
 echo "Stap 2: Swift programmeerfout in NativePlayerViewController automatisch repareren..."
 # We vervangen de foutieve 'multiplier: 0.22' door een geldige 'constant: 22' om de UIKit crash te herstellen
@@ -46,33 +44,37 @@ EOF
 echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 5: App compileren voor echte iPhone..."
+echo "Stap 5: App archiveren voor echte iPhone..."
+# We maken een officieel Xcode archief aan om de executable te garanderen
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
   -configuration Release \
   -sdk iphoneos \
   -destination 'generic/platform=iOS' \
-  CONFIGURATION_BUILD_DIR="$TEMP_BUILD" \
+  -archivePath "$ROOT/build/VIDIYOW.xcarchive" \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
   SWIFT_STRICT_CONCURRENCY=minimal \
-  build
+  archive
 
-echo "Stap 6: Geldige IPA-structuur aanmaken en inpakken..."
-# Maak de verplichte Payload-map aan binnen de export-map
+echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
+# Zorg dat de exportmap en Payload-map volledig schoon zijn
+rm -rf "$EXPORT"
 mkdir -p "$EXPORT/Payload"
 
-# Kopieer de gecompileerde .app-bundel naar de Payload-map
-cp -r "$TEMP_BUILD/VIDIYOW.app" "$EXPORT/Payload/"
+# Kopieer de ALTIJD complete .app vanuit het gemaakte archief naar de Payload-map
+cp -r "$ROOT/build/VIDIYOW.xcarchive/Products/Applications/VIDIYOW.app" "$EXPORT/Payload/"
 
-# Ga naar de exportmap om de Payload-map te zippen naar een .ipa-bestand
+# Ga fysiek naar de exportmap om foutieve paden in de zip te voorkomen
 cd "$EXPORT"
-zip -r "VIDIYOW.ipa" "Payload"
 
-# Ruim de tijdelijke mappen op zodat alleen het .ipa-bestand overblijft voor GitHub Artifacts
+# We zippen en sluiten onzichtbare macOS-bestanden (zoals UT en .DS_Store) expliciet uit
+zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
+
+# Ruim de losse Payload-map en het xcarchive-pakket netjes op
 rm -rf "Payload"
-rm -rf "$TEMP_BUILD"
+rm -rf "$ROOT/build/VIDIYOW.xcarchive"
 
 echo "Build voltooid! Uw geldige IPA staat klaar in: $EXPORT/VIDIYOW.ipa"
