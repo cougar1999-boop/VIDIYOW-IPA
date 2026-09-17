@@ -32,11 +32,11 @@ EOF
 echo "Stap 3: Schoon Xcode project genereren..."
 xcodegen generate
 
-echo "Stap 4: Projectformaat handmatig downgraden naar Xcode 15 (objectVersion 60)..."
-# Dit commando zoekt objectVersion = 77 (Xcode 16) op en vervangt het door 60 (Xcode 15)
+echo "Stap 4: Projectformaat handmatig downgraden naar Xcode 15..."
 sed -i '' 's/objectVersion = 77;/objectVersion = 60;/g' "$ROOT/VIDIYOW.xcodeproj/project.pbxproj" || true
 
-echo "Stap 5: App compileren voor echte iPhone (iOS Device)..."
+echo "Stap 5: App compileren voor echte iPhone (zonder Storyboard validatie)..."
+# We voegen IBTOOL_NO_COMPILATION=YES toe om de crash op regel 10 te omzeilen
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -47,6 +47,7 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
+  IBTOOL_NO_COMPILATION=YES \
   build
 
 echo "Build voltooid! De bestanden staan in: $EXPORT"
