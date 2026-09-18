@@ -24,7 +24,6 @@ final class NativePlayerViewController: UIViewController {
     private var liveRecoveryCount = 0
     private var lastLiveRecoveryAt = Date.distantPast
     private var vodRetryCount = 0
-    private var hasClosed = false
     private var resumePosition: Double = 0
     private var resumePromptShown = false
     private var subtitleCues: [SubtitleCue] = []
@@ -71,7 +70,6 @@ final class NativePlayerViewController: UIViewController {
         view.backgroundColor = .black
         setupUI()
         resumePosition = isVOD ? loadResume() : 0
-        configureAudioSession()
         configurePlayer()
         if isVOD {
             searchSubtitles()
@@ -138,7 +136,7 @@ final class NativePlayerViewController: UIViewController {
             loadingLabel.topAnchor.constraint(equalTo: spinner.bottomAnchor, constant: 18),
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 45),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -45),
-            subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)
+            subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -22)
         ])
 
         controls.translatesAutoresizingMaskIntoConstraints = false
@@ -205,21 +203,10 @@ final class NativePlayerViewController: UIViewController {
 
     private func configurePlayer() {
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-        let options: [String: Any] = [
-            AVURLAssetHTTPUserAgentKey: userAgent,
-            "AVURLAssetHTTPHeaderFieldsKey": [
-                "User-Agent": userAgent,
-                "Accept": "*/*",
-                "Referer": referer
-            ]
-        ]
+        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
         let asset = AVURLAsset(url: streamURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
         player = AVPlayer(playerItem: item)
-        player.automaticallyWaitsToMinimizeStalling = true
-        player.isMuted = false
-        player.volume = 1.0
         player.actionAtItemEnd = .pause
 
         playerLayer = AVPlayerLayer(player: player)
@@ -366,58 +353,17 @@ final class NativePlayerViewController: UIViewController {
     }
 
     @objc private func closePlayer() {
-        guard !hasClosed else { return }
-        hasClosed = true
-
-        if isVOD {
-            saveResume(player?.currentTime().seconds ?? 0)
-        }
-
+        // Close only the native player. Do not alter the VOD playback pipeline.
+        // The underlying WKWebView is restored after dismissal.
+        if isVOD { saveResume(player?.currentTime().seconds ?? 0) }
+        player?.pause()
         controlsTimer?.invalidate()
         stallTimer?.invalidate()
         saveTimer?.invalidate()
-        statusObservation?.invalidate()
-        statusObservation = nil
-        timeControlObservation?.invalidate()
-        timeControlObservation = nil
-        if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
-        if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }
-        endObserver = nil
-        failureObserver = nil
-        if let observer = timeObserver {
-            player?.removeTimeObserver(observer)
-            timeObserver = nil
-        }
-        subtitleCues.removeAll()
-        subtitleLabel.isHidden = true
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-
         let presenter = presentingViewController as? WebPlayerViewController
         dismiss(animated: true) {
             presenter?.restoreWebPlayer()
         }
-    }
-
-    private func configureAudioSession() {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay, .allowBluetoothA2DP])
-            try session.setActive(true)
-        } catch {
-            print("VIDIYOW audio session error: \(error)")
-        }
-    }
-
-    deinit {
-        controlsTimer?.invalidate()
-        stallTimer?.invalidate()
-        saveTimer?.invalidate()
-        statusObservation?.invalidate()
-        timeControlObservation?.invalidate()
-        if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
-        if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }
-        if let observer = timeObserver { player?.removeTimeObserver(observer) }
     }
 
     private func resumeKey() -> String {
@@ -479,17 +425,9 @@ final class NativePlayerViewController: UIViewController {
         guard !isBeingDismissed else { return }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
-        let options: [String: Any] = [
-            AVURLAssetHTTPUserAgentKey: userAgent,
-            "AVURLAssetHTTPHeaderFieldsKey": [
-                "User-Agent": userAgent,
-                "Accept": "*/*",
-                "Referer": referer
-            ]
-        ]
+        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
         let asset = AVURLAsset(url: streamURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
         player?.replaceCurrentItem(with: item)
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
@@ -536,9 +474,7 @@ final class NativePlayerViewController: UIViewController {
             guard let self, let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let items = root["results"] as? [[String: Any]] else { return }
             var results: [(String,String,String)] = []
             for item in items {
-                let lang = (item["language"] as? String) ?? (item["lang"] as? String) ?? ""
-                let fileID = (item["file_id"] as? String) ?? (item["fileID"] as? String) ?? (item["id"] as? String) ?? ""
-                guard !lang.isEmpty, !fileID.isEmpty else { continue }
+                guard let lang = item["language"] as? String, let fileID = item["file_id"] as? String, !lang.isEmpty, !fileID.isEmpty else { continue }
                 results.append((lang, self.subtitleLabel(for: lang), fileID))
             }
             DispatchQueue.main.async { self.subtitleSearchResults = results }
@@ -546,7 +482,6 @@ final class NativePlayerViewController: UIViewController {
     }
 
     @objc private func showSubtitleMenu() {
-        if subtitleSearchResults.isEmpty { searchSubtitles() }
         let alert = UIAlertController(title: "Ondertitels", message: nil, preferredStyle: .actionSheet)
         alert.addAction(UIAlertAction(title: "Off", style: .default) { [weak self] _ in self?.subtitleCues.removeAll() })
         for result in subtitleSearchResults {

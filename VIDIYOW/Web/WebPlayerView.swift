@@ -68,13 +68,8 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
                       server: String((source && source.server) || ''),
                       user_agent: \(jsQuote(VIDIYOWConstants.defaultUserAgent))
                     };
-                    try {
-                      document.documentElement.style.background = 'black';
-                      document.body.style.background = 'black';
-                      document.body.style.visibility = 'hidden';
-                    } catch(e) {}
                     window.VidiyowNativePlayer.playVod(String(url || ''), JSON.stringify(meta));
-                    return Promise.resolve(false);
+                    return Promise.resolve();
                   }
                 } catch(e) { console.error('VIDIYOW native VOD bridge', e); }
                 return original.apply(this, arguments);
@@ -118,41 +113,10 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.load(URLRequest(url: VIDIYOWConstants.webPlayerURL, cachePolicy: .useProtocolCachePolicy))
     }
 
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "vidiyowNative", let body = message.body as? [String: Any], let action = body["action"] as? String, let url = body["url"] as? String, !url.isEmpty else { return }
-        let metaString = body["meta"] as? String ?? "{}"
-        var meta: [String: Any] = [:]
-        if let data = metaString.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { meta = object }
-
-        let title = meta["title"] as? String ?? (action == "stalker" ? "Live TV" : "Video")
-        let mediaType = meta["media_type"] as? String ?? "live"
-        let year = meta["year"] as? String ?? ""
-        let portal = meta["portal"] as? String ?? meta["server"] as? String ?? ""
-        let server = meta["server"] as? String ?? portal
-        let userAgent = meta["user_agent"] as? String ?? VIDIYOWConstants.defaultUserAgent
-
-        if action == "vod" {
-            hideWebPlayerForNativePlayback()
-        }
-
-        let player = NativePlayerViewController(
-            url: url,
-            title: title,
-            mediaType: action == "stalker" ? "live" : mediaType,
-            year: year,
-            portal: portal,
-            referer: server,
-            userAgent: userAgent
-        )
-        player.modalPresentationStyle = .fullScreen
-        present(player, animated: true)
-    }
-
     func restoreWebPlayer() {
         guard isViewLoaded, let webView else { return }
         webView.isHidden = false
         webView.alpha = 1.0
-        webView.bringSubviewToFront(webView)
         let script = """
         (function(){
           try {
@@ -168,30 +132,30 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.evaluateJavaScript(script, completionHandler: nil)
     }
 
-    private func hideWebPlayerForNativePlayback() {
-        guard isViewLoaded, let webView else { return }
-        let script = """
-        (function(){
-          try {
-            document.documentElement.style.background = 'black';
-            document.body.style.background = 'black';
-            document.body.style.visibility = 'hidden';
-          } catch(e) {}
-        })();
-        """
-        webView.evaluateJavaScript(script, completionHandler: nil)
-    }
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "vidiyowNative", let body = message.body as? [String: Any], let action = body["action"] as? String, let url = body["url"] as? String, !url.isEmpty else { return }
+        let metaString = body["meta"] as? String ?? "{}"
+        var meta: [String: Any] = [:]
+        if let data = metaString.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { meta = object }
 
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        if presentedViewController == nil {
-            restoreWebPlayer()
-        }
-    }
+        let title = meta["title"] as? String ?? (action == "stalker" ? "Live TV" : "Video")
+        let mediaType = meta["media_type"] as? String ?? "live"
+        let year = meta["year"] as? String ?? ""
+        let portal = meta["portal"] as? String ?? meta["server"] as? String ?? ""
+        let server = meta["server"] as? String ?? portal
+        let userAgent = meta["user_agent"] as? String ?? VIDIYOWConstants.defaultUserAgent
 
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        restoreWebPlayer()
+        let player = NativePlayerViewController(
+            url: url,
+            title: title,
+            mediaType: action == "stalker" ? "live" : mediaType,
+            year: year,
+            portal: portal,
+            referer: server,
+            userAgent: userAgent
+        )
+        player.modalPresentationStyle = .fullScreen
+        present(player, animated: true)
     }
 
     private func jsQuote(_ value: String) -> String {
