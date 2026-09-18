@@ -113,16 +113,6 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.load(URLRequest(url: VIDIYOWConstants.webPlayerURL, cachePolicy: .useProtocolCachePolicy))
     }
 
-    func restoreWebPlayer() {
-        guard isViewLoaded, let webView else { return }
-        webView.isHidden = false
-        webView.alpha = 1.0
-        let script = """
-        (function(){try{document.documentElement.style.removeProperty('visibility');document.documentElement.style.removeProperty('background');if(document.body){document.body.style.removeProperty('visibility');document.body.style.removeProperty('background');}}catch(e){}})();
-        """
-        webView.evaluateJavaScript(script, completionHandler: nil)
-    }
-
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "vidiyowNative", let body = message.body as? [String: Any], let action = body["action"] as? String, let url = body["url"] as? String, !url.isEmpty else { return }
         let metaString = body["meta"] as? String ?? "{}"
