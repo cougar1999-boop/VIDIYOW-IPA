@@ -151,7 +151,9 @@ final class NativePlayerViewController: UIViewController {
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 45),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -45),
         ])
-        NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true
+        if let subtitleLabel {
+            NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true
+        }
 
         controls.translatesAutoresizingMaskIntoConstraints = false
         controls.backgroundColor = UIColor.black.withAlphaComponent(0.82)
@@ -588,7 +590,7 @@ final class NativePlayerViewController: UIViewController {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             guard let self, error == nil, let data else {
                 DispatchQueue.main.async { [weak self] in self?.hideLoading() }
                 return
@@ -614,8 +616,6 @@ final class NativePlayerViewController: UIViewController {
                     alert.addAction(UIAlertAction(title: "OK", style: .default))
                     self.present(alert, animated: true)
                 }
-                _ = language
-                _ = response
             }
         }.resume()
     }
@@ -642,7 +642,7 @@ final class NativePlayerViewController: UIViewController {
 
         for result in subtitleSearchResults {
             alert.addAction(UIAlertAction(title: result.label, style: .default) { [weak self] _ in
-                self?.loadSubtitle(fileID: result.fileID, language: result.language)
+                self?.loadSubtitle(fileID: result.fileID)
             })
         }
 
@@ -658,7 +658,7 @@ final class NativePlayerViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    private func loadSubtitle(fileID: String, language: String) {
+    private func loadSubtitle(fileID: String) {
         var components = URLComponents(string: VIDIYOWConstants.subtitleAPI)
         components?.queryItems = [URLQueryItem(name: "action", value: "download"), URLQueryItem(name: "file_id", value: fileID)]
         guard let url = components?.url else { return }
@@ -669,7 +669,6 @@ final class NativePlayerViewController: UIViewController {
             DispatchQueue.main.async {
                 self.subtitleCues = cues
                 self.hideLoading()
-                _ = language
             }
         }.resume()
     }
