@@ -45,15 +45,18 @@ code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\" headers', '\"AVURLAssetHT
 code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\"options', '\"AVURLAssetHTTPHeaderFieldsKey\": options')
 
 # Herstel 3: Dubbele 'deinit' declaratie oplossen
-# We zoeken naar een deinit die NotificationCenter opruimt (vaak de boosdoener bij dubbele deinits) en halen die weg,
-# óf we hernoemen de tweede deinit naar een dummy functie om de redeclaratie-fout op te lossen.
 if code.count('deinit') > 1:
-    # Vervang de tweede 'deinit' door een unieke tijdelijke functienaam zodat Swift niet crasht
     parts = code.split('deinit')
-    new_code = parts[0] + 'deinit' + parts[1] # Eerste deinit behouden
+    new_code = parts[0] + 'deinit' + parts[1]
     for part in parts[2:]:
         new_code += 'func dummy_deinit_placeholder()' + part
     code = new_code
+
+# Herstel 4: Voeg de ontbrekende 'seekToLatest' extensie toe voor AVPlayer zodat Xcode weet wat dit is
+# We injecteren deze extension helemaal onderaan het bestand
+if 'extension AVPlayer' not in code:
+    extension_code = '\n\nimport AVFoundation\nextension AVPlayer {\n    func seekToLatest(completionHandler: @escaping (Bool) -> Void = { _ in }) {\n        if let currentItem = self.currentItem, currentItem.status == .readyToPlay {\n            let duration = currentItem.duration\n            if CMTIME_IS_VALID(duration) && !CMTIME_IS_INDEFINITE(duration) {\n                self.seek(to: duration, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: completionHandler)\n            } else {\n                completionHandler(false)\n            }\n        } else {\n            completionHandler(false)\n        }\n    }\n}\n'
+    code = code + extension_code
 
 with open('$FILE', 'w') as f:
     f.write(code)
