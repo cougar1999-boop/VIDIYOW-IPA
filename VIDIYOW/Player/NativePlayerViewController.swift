@@ -245,11 +245,11 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func initialPlaybackURL() -> URL {
-        // VOD goes through the dedicated VOD proxy from the start. This avoids
-        // AVPlayer trying to consume a raw/provider-specific VOD stream directly,
-        // which can cause timestamp jumps, skipped ranges and repeated stalls.
+        // VOD uses the dedicated VOD proxy. Live TV stays DIRECT: the original
+        // iOS player played the provider stream without routing it through our
+        // server, which gives the fastest possible startup and keeps the player
+        // close to the live edge.
         if isVOD, let proxy = fallbackURL { return proxy }
-        if let hls = makeStalkerHLSURL() { return hls }
         return streamURL
     }
 
@@ -280,11 +280,9 @@ final class NativePlayerViewController: UIViewController {
         player.isMuted = false
         player.volume = 1.0
         player.actionAtItemEnd = .pause
-        // Keep Live TV close to the live edge. Do not apply the large VOD
-        // buffering policy to live HLS; it adds latency and can make playback
-        // appear to jump backwards when the live playlist advances.
+        // Keep VOD buffering large, but do not add a deliberate Live TV delay.
         player.automaticallyWaitsToMinimizeStalling = isVOD
-        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 0.0
+        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 3.0
 
         playerLayer = AVPlayerLayer(player: player)
         playerLayer.videoGravity = .resizeAspectFill
@@ -300,13 +298,7 @@ final class NativePlayerViewController: UIViewController {
                         self.player?.pause()
                         self.showResumeDialog()
                     } else {
-                        if !self.isVOD {
-                            self.player?.seekToLatest { [weak self] _ in
-                                self?.player?.play()
-                            }
-                        } else {
-                            self.player?.play()
-                        }
+                        self.player?.play()
                         self.hideControlsSoon()
                     }
                 } else if item.status == .failed {
@@ -539,24 +531,16 @@ final class NativePlayerViewController: UIViewController {
         ]
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 0.0
+        item.preferredForwardBufferDuration = isVOD ? 120.0 : 3.0
         player?.replaceCurrentItem(with: item)
         player?.isMuted = false
         player?.volume = 1.0
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
             if item.status == .readyToPlay {
-                if self.isVOD && position > 0 {
-                    self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
-                }
+                if self.isVOD && position > 0 { self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
                 self.hideLoading()
-                if self.isVOD {
-                    self.player?.play()
-                } else {
-                    self.player?.seekToLatest { [weak self] _ in
-                        self?.player?.play()
-                    }
-                }
+                self.player?.play()
             } else if item.status == .failed {
                 if self.isVOD && !self.usedFallback {
                     self.usedFallback = true
