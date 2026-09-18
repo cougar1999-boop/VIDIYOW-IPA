@@ -68,8 +68,13 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
                       server: String((source && source.server) || ''),
                       user_agent: \(jsQuote(VIDIYOWConstants.defaultUserAgent))
                     };
+                    try {
+                      document.documentElement.style.background = 'black';
+                      document.body.style.background = 'black';
+                      document.body.style.visibility = 'hidden';
+                    } catch(e) {}
                     window.VidiyowNativePlayer.playVod(String(url || ''), JSON.stringify(meta));
-                    return Promise.resolve();
+                    return Promise.resolve(false);
                   }
                 } catch(e) { console.error('VIDIYOW native VOD bridge', e); }
                 return original.apply(this, arguments);
@@ -126,6 +131,10 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         let server = meta["server"] as? String ?? portal
         let userAgent = meta["user_agent"] as? String ?? VIDIYOWConstants.defaultUserAgent
 
+        if action == "vod" {
+            hideWebPlayerForNativePlayback()
+        }
+
         let player = NativePlayerViewController(
             url: url,
             title: title,
@@ -137,6 +146,52 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         )
         player.modalPresentationStyle = .fullScreen
         present(player, animated: true)
+    }
+
+    func restoreWebPlayer() {
+        guard isViewLoaded, let webView else { return }
+        webView.isHidden = false
+        webView.alpha = 1.0
+        webView.bringSubviewToFront(webView)
+        let script = """
+        (function(){
+          try {
+            document.documentElement.style.removeProperty('background');
+            document.documentElement.style.removeProperty('visibility');
+            if (document.body) {
+              document.body.style.removeProperty('background');
+              document.body.style.removeProperty('visibility');
+            }
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    private func hideWebPlayerForNativePlayback() {
+        guard isViewLoaded, let webView else { return }
+        let script = """
+        (function(){
+          try {
+            document.documentElement.style.background = 'black';
+            document.body.style.background = 'black';
+            document.body.style.visibility = 'hidden';
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if presentedViewController == nil {
+            restoreWebPlayer()
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        restoreWebPlayer()
     }
 
     private func jsQuote(_ value: String) -> String {
