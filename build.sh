@@ -19,7 +19,7 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfouten automatisch repareren via Python..."
-# We gebruiken Python om de code exact en zonder syntaxfouten aan te passen, zodat Xcode succesvol kan compileren
+# 2a: Specifieke reparaties voor NativePlayerViewController
 find "$ROOT" -name "NativePlayerViewController.swift" | while read -r FILE; do
   echo "Repareren van bestand: $FILE"
   python3 -c "
@@ -43,6 +43,27 @@ code = code.replace('AVURLAssetHTTPHeaderFieldsKey', '\"AVURLAssetHTTPHeaderFiel
 with open('$FILE', 'w') as f:
     f.write(code)
 "
+done
+
+# 2b: Algemene iOS 17/18 API-fouten in álle Swift-bestanden opsporen en repareren
+find "$ROOT" -name "*.swift" | while read -r FILE; do
+  python3 -c "
+import sys
+with open(sys.argv[1], 'r') as f:
+    code = f.read()
+
+altered = False
+
+# Herstel verouderde keyWindow aanroepen die crashen in moderne Xcode versies
+if 'UIApplication.shared.keyWindow' in code:
+    code = code.replace('UIApplication.shared.keyWindow', 'UIApplication.shared.connectedScenes.flatMap { ($0 as? UIWindowScene)?.windows ?? [] }.first { $0.isKeyWindow }')
+    altered = True
+
+if altered:
+    print(f'-> Universele iOS patch toegepast op: {sys.argv[1]}')
+    with open(sys.argv[1], 'w') as f:
+        f.write(code)
+" "$FILE"
 done
 
 echo "Stap 3: Xcode Project configuratie aanmaken..."
@@ -76,6 +97,7 @@ echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
 echo "Stap 5: App archiveren voor echte iPhone..."
+# We vangen de log op om bij een compiler-crash exact te tonen welke regel code fout is
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
@@ -87,7 +109,14 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY="" \
   SWIFT_STRICT_CONCURRENCY=minimal \
-  archive
+  archive > xcodebuild.log 2>&1 || {
+    echo "------------------------------------------------------------------"
+    echo "❌ CRITIEKE FOUT: Swift compilatie (CompileSwift) is mislukt!"
+    echo "Hieronder staan de exacte foutmeldingen uit de broncode:"
+    echo "------------------------------------------------------------------"
+    grep -E "error:|warning:" xcodebuild.log || tail -n 50 xcodebuild.log
+    exit 1
+  }
 
 echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
 rm -rf "$EXPORT"
@@ -111,5 +140,6 @@ zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
 # Ruim de tijdelijke mappen netjes op
 rm -rf "Payload"
 rm -rf "$ROOT/build/VIDIYOW.xcarchive"
+rm -f "$ROOT/xcodebuild.log"
 
 echo "Build voltooid! Uw geldige IPA staat klaar in: $EXPORT/VIDIYOW.ipa"
