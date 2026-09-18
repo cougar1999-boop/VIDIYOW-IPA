@@ -19,28 +19,35 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfouten automatisch repareren via Python..."
-# We zoeken nu in álle mappen (hoofdletters/kleine letters) naar het juiste bestand
+# We zoeken nu FORCEERD in álle mappen (zowel vidiyow als VIDIYOW) naar NativePlayerViewController.swift
 find "$ROOT" -iname "NativePlayerViewController.swift" | while read -r FILE; do
-  echo "Repareren van bestand: $FILE"
+  echo "Rigoureus repareren van bestand: $FILE"
   python3 -c "
-import sys
+import sys, re
 with open('$FILE', 'r') as f:
     code = f.read()
 
-# Herstel 1: Vervang de foutieve UIKit .constraint multiplier aanroep door geldige NSLayoutConstraint syntax
-code = code.replace(
-    'subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 1.0, constant: 22)',
-    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true'
+# Herstel 1: Multiplier constraints robuust vervangen met regex (negeert spatieverschillen)
+code = re.sub(
+    r'subtitleLabel\.bottomAnchor\.constraint\(equalTo:\s*view\.bottomAnchor,\s*multiplier:\s*1\.0,\s*constant:\s*22\)',
+    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true',
+    code
 )
-code = code.replace(
-    'subtitleLabel.bottomAnchor.constraint(equalTo: view.bottomAnchor, multiplier: 0.22)',
-    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0).isActive = true'
+code = re.sub(
+    r'subtitleLabel\.bottomAnchor\.constraint\(equalTo:\s*view\.bottomAnchor,\s*multiplier:\s*0\.22\)',
+    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0).isActive = true',
+    code
 )
 
-# Herstel 2: Zet de ongedefinieerde AVURLAssetHTTPHeaderFieldsKey correct om naar een String key inclusief de missende dubbelpunt
-code = code.replace('AVURLAssetHTTPHeaderFieldsKey', '\"AVURLAssetHTTPHeaderFieldsKey\"')
-# Mocht er door de vorige poging een syntaxfout zijn ontstaan zonder dubbelpunt, herstellen we dat hier direct:
-code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\" ', '\"AVURLAssetHTTPHeaderFieldsKey\": ')
+# Herstel 2: AVURLAssetHTTPHeaderFieldsKey robuust omzetten naar String key met de verplichte dubbelpunt (:) er direct achter!
+# Dit zoekt naar het woord AVURLAssetHTTPHeaderFieldsKey waar eventueel GEEN quotes omheen staan en zet er direct ' : ' achter.
+code = re.sub(r'\"?AVURLAssetHTTPHeaderFieldsKey\"?\s*([,\]:])', r'\"AVURLAssetHTTPHeaderFieldsKey\"\1', code)
+code = re.sub(r'\"VURLAssetHTTPHeaderFieldsKey\"\s*([,\]:])', r'\"AVURLAssetHTTPHeaderFieldsKey\"\1', code) # vangt eventuele typefouten op
+
+# Soms staat er [AVURLAssetHTTPHeaderFieldsKey: headers] -> zorg dat de dubbelpunt er ALTIJD staat
+# We zoeken naar de tekst varianten die de fout veroorzaken en dwingen de juiste Swift dictionary syntax af:
+code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\" headers', '\"AVURLAssetHTTPHeaderFieldsKey\": headers')
+code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\"options', '\"AVURLAssetHTTPHeaderFieldsKey\": options')
 
 with open('$FILE', 'w') as f:
     f.write(code)
