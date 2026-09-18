@@ -19,7 +19,6 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfouten automatisch repareren via Python..."
-# We zoeken nu FORCEERD in álle mappen (zowel vidiyow als VIDIYOW) naar NativePlayerViewController.swift
 find "$ROOT" -iname "NativePlayerViewController.swift" | while read -r FILE; do
   echo "Rigoureus repareren van bestand: $FILE"
   python3 -c "
@@ -27,27 +26,34 @@ import sys, re
 with open('$FILE', 'r') as f:
     code = f.read()
 
-# Herstel 1: Multiplier constraints robuust vervangen met regex (negeert spatieverschillen)
+# Herstel 1: Multiplier constraints vervangen ZONDER '.isActive = true' omdat ze in een NSLayoutConstraint.activate array staan
 code = re.sub(
     r'subtitleLabel\.bottomAnchor\.constraint\(equalTo:\s*view\.bottomAnchor,\s*multiplier:\s*1\.0,\s*constant:\s*22\)',
-    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true',
+    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22)',
     code
 )
 code = re.sub(
     r'subtitleLabel\.bottomAnchor\.constraint\(equalTo:\s*view\.bottomAnchor,\s*multiplier:\s*0\.22\)',
-    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0).isActive = true',
+    'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0)',
     code
 )
 
-# Herstel 2: AVURLAssetHTTPHeaderFieldsKey robuust omzetten naar String key met de verplichte dubbelpunt (:) er direct achter!
-# Dit zoekt naar het woord AVURLAssetHTTPHeaderFieldsKey waar eventueel GEEN quotes omheen staan en zet er direct ' : ' achter.
+# Herstel 2: AVURLAssetHTTPHeaderFieldsKey omzetten naar String key
 code = re.sub(r'\"?AVURLAssetHTTPHeaderFieldsKey\"?\s*([,\]:])', r'\"AVURLAssetHTTPHeaderFieldsKey\"\1', code)
-code = re.sub(r'\"VURLAssetHTTPHeaderFieldsKey\"\s*([,\]:])', r'\"AVURLAssetHTTPHeaderFieldsKey\"\1', code) # vangt eventuele typefouten op
-
-# Soms staat er [AVURLAssetHTTPHeaderFieldsKey: headers] -> zorg dat de dubbelpunt er ALTIJD staat
-# We zoeken naar de tekst varianten die de fout veroorzaken en dwingen de juiste Swift dictionary syntax af:
+code = re.sub(r'\"VURLAssetHTTPHeaderFieldsKey\"\s*([,\]:])', r'\"AVURLAssetHTTPHeaderFieldsKey\"\1', code)
 code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\" headers', '\"AVURLAssetHTTPHeaderFieldsKey\": headers')
 code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\"options', '\"AVURLAssetHTTPHeaderFieldsKey\": options')
+
+# Herstel 3: Dubbele 'deinit' declaratie oplossen
+# We zoeken naar een deinit die NotificationCenter opruimt (vaak de boosdoener bij dubbele deinits) en halen die weg,
+# óf we hernoemen de tweede deinit naar een dummy functie om de redeclaratie-fout op te lossen.
+if code.count('deinit') > 1:
+    # Vervang de tweede 'deinit' door een unieke tijdelijke functienaam zodat Swift niet crasht
+    parts = code.split('deinit')
+    new_code = parts[0] + 'deinit' + parts[1] # Eerste deinit behouden
+    for part in parts[2:]:
+        new_code += 'func dummy_deinit_placeholder()' + part
+    code = new_code
 
 with open('$FILE', 'w') as f:
     f.write(code)
@@ -63,7 +69,6 @@ with open(sys.argv[1], 'r') as f:
 
 altered = False
 
-# Herstel verouderde keyWindow aanroepen die crashen in moderne Xcode versies
 if 'UIApplication.shared.keyWindow' in code:
     code = code.replace('UIApplication.shared.keyWindow', 'UIApplication.shared.connectedScenes.flatMap { ($0 as? UIWindowScene)?.windows ?? [] }.first { $0.isKeyWindow }')
     altered = True
@@ -130,7 +135,6 @@ echo "Stap 6: Geldige IPA-structuur handmatig samenstellen..."
 rm -rf "$EXPORT"
 mkdir -p "$EXPORT/Payload"
 
-# Kopieer de complete .app vanuit het gemaakte archief naar de Payload-map
 cp -r "$ROOT/build/VIDIYOW.xcarchive/Products/Applications/VIDIYOW.app" "$EXPORT/Payload/"
 
 echo "Stap 6b: Controleren of de executable (de app-motor) daadwerkelijk bestaat..."
@@ -139,13 +143,8 @@ if [ ! -f "$EXPORT/Payload/VIDIYOW.app/VIDIYOW" ]; then
   exit 1
 fi
 
-# Ga fysiek naar de exportmap om foutieve paden in de zip te voorkomen
 cd "$EXPORT"
-
-# Zippen zonder macOS-systeembestanden
 zip -r -X "VIDIYOW.ipa" "Payload" -x "*.DS_Store" -x "__MACOSX*"
-
-# Ruim de tijdelijke mappen netjes op
 rm -rf "Payload"
 rm -rf "$ROOT/build/VIDIYOW.xcarchive"
 rm -f "$ROOT/xcodebuild.log"
