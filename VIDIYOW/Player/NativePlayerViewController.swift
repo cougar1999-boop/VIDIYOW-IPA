@@ -245,10 +245,7 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func initialPlaybackURL() -> URL {
-        // VOD uses the dedicated VOD proxy. Live TV stays DIRECT: the original
-        // iOS player played the provider stream without routing it through our
-        // server, which gives the fastest possible startup and keeps the player
-        // close to the live edge.
+        if let hls = makeStalkerHLSURL() { return hls }
         if isVOD, let proxy = fallbackURL { return proxy }
         return streamURL
     }
@@ -280,9 +277,8 @@ final class NativePlayerViewController: UIViewController {
         player.isMuted = false
         player.volume = 1.0
         player.actionAtItemEnd = .pause
-        // Keep VOD buffering large, but do not add a deliberate Live TV delay.
-        player.automaticallyWaitsToMinimizeStalling = isVOD
-        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 3.0
+        player.automaticallyWaitsToMinimizeStalling = true
+        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
 
         playerLayer = AVPlayerLayer(player: player)
         playerLayer.videoGravity = .resizeAspectFill
@@ -531,7 +527,7 @@ final class NativePlayerViewController: UIViewController {
         ]
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 3.0
+        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
         player?.replaceCurrentItem(with: item)
         player?.isMuted = false
         player?.volume = 1.0
@@ -572,8 +568,8 @@ final class NativePlayerViewController: UIViewController {
                     self.lastLiveTime = t
                     self.lastLiveProgressAt = now
                 }
-                if now.timeIntervalSince(self.lastLiveProgressAt) >= 45 { self.recoverPlayback(); self.lastLiveProgressAt = now }
-            } else if p.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(self.lastLiveProgressAt) >= 45 {
+                if now.timeIntervalSince(self.lastLiveProgressAt) >= 30 { self.recoverPlayback(); self.lastLiveProgressAt = now }
+            } else if p.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(self.lastLiveProgressAt) >= 30 {
                 self.recoverPlayback(); self.lastLiveProgressAt = now
             }
         }
