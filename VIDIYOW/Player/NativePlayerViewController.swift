@@ -245,6 +245,10 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func initialPlaybackURL() -> URL {
+        // VOD goes through the dedicated VOD proxy from the start. This avoids
+        // AVPlayer trying to consume a raw/provider-specific VOD stream directly,
+        // which can cause timestamp jumps, skipped ranges and repeated stalls.
+        if isVOD, let proxy = fallbackURL { return proxy }
         if let hls = makeStalkerHLSURL() { return hls }
         return streamURL
     }
@@ -277,7 +281,7 @@ final class NativePlayerViewController: UIViewController {
         player.volume = 1.0
         player.actionAtItemEnd = .pause
         player.automaticallyWaitsToMinimizeStalling = true
-        player.currentItem?.preferredForwardBufferDuration = isVOD ? 60.0 : 15.0
+        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
 
         playerLayer = AVPlayerLayer(player: player)
         playerLayer.videoGravity = .resizeAspectFill
@@ -298,9 +302,9 @@ final class NativePlayerViewController: UIViewController {
                     }
                 } else if item.status == .failed {
                     if self.isVOD { self.saveResume(self.player?.currentTime().seconds ?? 0) }
-                    if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
+                    if self.isVOD && !self.usedFallback {
                         self.usedFallback = true
-                        self.activePlaybackURL = fallback
+                        self.activePlaybackURL = self.streamURL
                         self.recreatePlayer(at: self.player?.currentTime().seconds ?? 0)
                     } else {
                         self.recoverPlayback()
@@ -511,7 +515,7 @@ final class NativePlayerViewController: UIViewController {
         ]
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 60.0 : 15.0
+        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
         player?.replaceCurrentItem(with: item)
         player?.isMuted = false
         player?.volume = 1.0
@@ -522,9 +526,9 @@ final class NativePlayerViewController: UIViewController {
                 self.hideLoading()
                 self.player?.play()
             } else if item.status == .failed {
-                if self.isVOD && !self.usedFallback, let fallback = self.fallbackURL {
+                if self.isVOD && !self.usedFallback {
                     self.usedFallback = true
-                    self.activePlaybackURL = fallback
+                    self.activePlaybackURL = self.streamURL
                     self.recreatePlayer(at: position)
                 } else {
                     self.recoverPlayback()
@@ -586,10 +590,10 @@ final class NativePlayerViewController: UIViewController {
                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let items = root["results"] as? [[String: Any]] {
                 for item in items {
-                    guard let language = item["language"] as? String,
-                          let fileID = item["file_id"] as? String,
-                          !language.isEmpty,
-                          !fileID.isEmpty else { continue }
+                    let language = String(describing: item["language"] ?? item["lang"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawFileID = item["file_id"] ?? item["fileID"] ?? item["id"]
+                    let fileID = String(describing: rawFileID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !language.isEmpty, !fileID.isEmpty, fileID != "<null>" else { continue }
                     results.append((language, self.subtitleLabel(for: language), fileID))
                 }
             }
@@ -644,13 +648,34 @@ final class NativePlayerViewController: UIViewController {
         components?.queryItems = [URLQueryItem(name: "action", value: "download"), URLQueryItem(name: "file_id", value: fileID)]
         guard let url = components?.url else { return }
         showLoading("Subtitle laden…")
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, let text = String(data: data, encoding: .utf8) else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self, error == nil, let data else {
+                DispatchQueue.main.async { [weak self] in self?.hideLoading() }
+                return
+            }
+
+            var text = String(data: data, encoding: .utf8) ?? ""
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let candidates = ["content", "subtitle", "text", "data"]
+                for key in candidates {
+                    if let value = root[key] as? String, !value.isEmpty {
+                        text = value
+                        break
+                    }
+                }
+            }
+
             let cues = VTTParser.parse(text)
             DispatchQueue.main.async {
                 self.subtitleCues = cues
                 self.hideLoading()
+                if cues.isEmpty {
+                    let alert = UIAlertController(title: "Ondertitels", message: "De gekozen ondertiteling kon niet worden geladen.", preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(alert, animated: true)
+                }
                 _ = language
+                _ = response
             }
         }.resume()
     }

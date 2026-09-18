@@ -92,8 +92,13 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
                       server: String((source && source.server) || ''),
                       user_agent: \(jsQuote(VIDIYOWConstants.defaultUserAgent))
                     };
+                    try {
+                      document.documentElement.style.background = 'black';
+                      document.body.style.background = 'black';
+                      document.body.style.visibility = 'hidden';
+                    } catch(e) {}
                     window.VidiyowNativePlayer.playVod(String(url || ''), JSON.stringify(meta));
-                    return Promise.resolve();
+                    return Promise.resolve(false);
                   }
                 } catch(e) { console.error('VIDIYOW native VOD bridge', e); }
                 return original.apply(this, arguments);
