@@ -205,8 +205,8 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func playbackURL() -> URL {
-        guard isVOD, !vodProxyStarted, let proxy = makeWorkingVODProxyURL() else {
-            return vodPlaybackURL ?? streamURL
+        guard isVOD, let proxy = makeWorkingVODProxyURL() else {
+            return streamURL
         }
         vodProxyStarted = true
         vodPlaybackURL = proxy
@@ -214,18 +214,12 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func makeWorkingVODProxyURL() -> URL? {
-        guard var components = URLComponents(string: "https://vidiyow.com/api/stream.php") else { return nil }
-        let path = streamURL.path.lowercased()
-        let ext: String
-        if let dot = path.lastIndex(of: "."), dot < path.endIndex {
-            ext = String(path[path.index(after: dot)...])
-        } else {
-            ext = "mp4"
-        }
+        // Native AVPlayer must not receive the original Xtream MKV/unsupported
+        // container directly. The dedicated VOD endpoint creates an HLS VOD
+        // playlist and transcodes incompatible video/audio for Apple playback.
+        guard var components = URLComponents(string: "https://vod.vidiyow.com/vod.php") else { return nil }
         var items = [
-            URLQueryItem(name: "url", value: streamURL.absoluteString),
-            URLQueryItem(name: "vod", value: "1"),
-            URLQueryItem(name: "ext", value: ext)
+            URLQueryItem(name: "url", value: streamURL.absoluteString)
         ]
         let r = referer.trimmingCharacters(in: .whitespacesAndNewlines)
         if !r.isEmpty { items.append(URLQueryItem(name: "referer", value: r)) }
@@ -272,6 +266,7 @@ final class NativePlayerViewController: UIViewController {
                     }
                 } else if item.status == .failed {
                     if self.isVOD { self.saveResume(self.player?.currentTime().seconds ?? 0) }
+                    print("VIDIYOW VOD AVPlayer error:", item.error?.localizedDescription ?? "unknown")
                     self.recoverPlayback()
                 }
             }
@@ -446,21 +441,18 @@ final class NativePlayerViewController: UIViewController {
             let position = max(player?.currentTime().seconds ?? 0, loadResume())
             saveResume(position)
 
-            // First recovery: restart the same working web-player proxy URL.
-            // Second and final recovery: direct Xtream URL. Never loop forever.
-            if vodRetryCount == 0 {
-                vodRetryCount = 1
+            // A failed VOD proxy session is recreated once. Never fall back
+            // to the original MKV/unsupported Xtream URL on iOS.
+            if vodRetryCount < 2 {
+                vodRetryCount += 1
                 showLoading("Film herstellen…")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     guard let self else { return }
-                    self.recreatePlayer(at: position, url: self.vodPlaybackURL ?? self.streamURL)
-                }
-            } else if !vodDirectFallbackUsed {
-                vodDirectFallbackUsed = true
-                showLoading("Film herstellen…")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                    guard let self else { return }
-                    self.recreatePlayer(at: position, url: self.streamURL)
+                    self.vodProxyStarted = false
+                    self.vodPlaybackURL = nil
+                    let proxy = self.makeWorkingVODProxyURL() ?? self.streamURL
+                    self.vodPlaybackURL = proxy
+                    self.recreatePlayer(at: position, url: proxy)
                 }
             } else {
                 hideLoading()
@@ -472,10 +464,8 @@ final class NativePlayerViewController: UIViewController {
             return
         }
 
-        let now = Date()
-        guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else { return }
         liveRecoveryCount += 1
-        lastLiveRecoveryAt = now
+        if liveRecoveryCount > 8 { return }
         showLoading("Live stream herstellen…")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             guard let self else { return }
