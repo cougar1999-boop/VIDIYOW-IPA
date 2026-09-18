@@ -151,9 +151,7 @@ final class NativePlayerViewController: UIViewController {
             subtitleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 45),
             subtitleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -45),
         ])
-        if let subtitleLabel {
-            NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true
-        }
+        NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 1.0, constant: 22).isActive = true
 
         controls.translatesAutoresizingMaskIntoConstraints = false
         controls.backgroundColor = UIColor.black.withAlphaComponent(0.82)
@@ -247,6 +245,9 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func initialPlaybackURL() -> URL {
+        // VOD goes through the dedicated VOD proxy from the start. This avoids
+        // AVPlayer trying to consume a raw/provider-specific VOD stream directly,
+        // which can cause timestamp jumps, skipped ranges and repeated stalls.
         if isVOD, let proxy = fallbackURL { return proxy }
         if let hls = makeStalkerHLSURL() { return hls }
         return streamURL
@@ -432,6 +433,9 @@ final class NativePlayerViewController: UIViewController {
     }
 
     @objc private func closePlayer() {
+        // Stop the native player completely before returning to the catalog.
+        // The VOD launch temporarily hides the underlying WKWebView, so restore
+        // it after dismissal as well. This prevents a persistent black screen.
         player?.pause()
         stallTimer?.invalidate()
         saveTimer?.invalidate()
@@ -590,32 +594,28 @@ final class NativePlayerViewController: UIViewController {
             return
         }
 
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
-            guard let self, error == nil, let data else {
-                DispatchQueue.main.async { [weak self] in self?.hideLoading() }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let self else {
+                DispatchQueue.main.async { completion?() }
                 return
             }
 
-            var text = String(data: data, encoding: .utf8) ?? ""
-            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let candidates = ["content", "subtitle", "text", "data"]
-                for key in candidates {
-                    if let value = root[key] as? String, !value.isEmpty {
-                        text = value
-                        break
-                    }
+            var results: [(language: String, label: String, fileID: String)] = []
+            if let data,
+               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let items = root["results"] as? [[String: Any]] {
+                for item in items {
+                    let language = String(describing: item["language"] ?? item["lang"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let rawFileID = item["file_id"] ?? item["fileID"] ?? item["id"]
+                    let fileID = String(describing: rawFileID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !language.isEmpty, !fileID.isEmpty, fileID != "<null>" else { continue }
+                    results.append((language, self.subtitleLabel(for: language), fileID))
                 }
             }
 
-            let cues = VTTParser.parse(text)
             DispatchQueue.main.async {
-                self.subtitleCues = cues
-                self.hideLoading()
-                if cues.isEmpty {
-                    let alert = UIAlertController(title: "Ondertitels", message: "De gekozen ondertiteling kon niet worden geladen.", preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "OK", style: .default))
-                    self.present(alert, animated: true)
-                }
+                self.subtitleSearchResults = results
+                completion?()
             }
         }.resume()
     }
@@ -642,7 +642,7 @@ final class NativePlayerViewController: UIViewController {
 
         for result in subtitleSearchResults {
             alert.addAction(UIAlertAction(title: result.label, style: .default) { [weak self] _ in
-                self?.loadSubtitle(fileID: result.fileID)
+                self?.loadSubtitle(fileID: result.fileID, language: result.language)
             })
         }
 
@@ -658,17 +658,39 @@ final class NativePlayerViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    private func loadSubtitle(fileID: String) {
+    private func loadSubtitle(fileID: String, language: String) {
         var components = URLComponents(string: VIDIYOWConstants.subtitleAPI)
         components?.queryItems = [URLQueryItem(name: "action", value: "download"), URLQueryItem(name: "file_id", value: fileID)]
         guard let url = components?.url else { return }
         showLoading("Subtitle laden…")
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let self, let data, let text = String(data: data, encoding: .utf8) else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            guard let self, error == nil, let data else {
+                DispatchQueue.main.async { [weak self] in self?.hideLoading() }
+                return
+            }
+
+            var text = String(data: data, encoding: .utf8) ?? ""
+            if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let candidates = ["content", "subtitle", "text", "data"]
+                for key in candidates {
+                    if let value = root[key] as? String, !value.isEmpty {
+                        text = value
+                        break
+                    }
+                }
+            }
+
             let cues = VTTParser.parse(text)
             DispatchQueue.main.async {
                 self.subtitleCues = cues
                 self.hideLoading()
+                if cues.isEmpty {
+                    let alert = UIAlertController(title: "Ondertitels", message: "De gekozen ondertiteling kon niet worden geladen.", preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(alert, animated: true)
+                }
+                _ = language
+                _ = response
             }
         }.resume()
     }
