@@ -118,16 +118,7 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.isHidden = false
         webView.alpha = 1.0
         let script = """
-        (function(){
-          try {
-            document.documentElement.style.removeProperty('background');
-            document.documentElement.style.removeProperty('visibility');
-            if (document.body) {
-              document.body.style.removeProperty('background');
-              document.body.style.removeProperty('visibility');
-            }
-          } catch(e) {}
-        })();
+        (function(){try{document.documentElement.style.removeProperty('visibility');document.documentElement.style.removeProperty('background');if(document.body){document.body.style.removeProperty('visibility');document.body.style.removeProperty('background');}}catch(e){}})();
         """
         webView.evaluateJavaScript(script, completionHandler: nil)
     }

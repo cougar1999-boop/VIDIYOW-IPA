@@ -24,10 +24,9 @@ final class NativePlayerViewController: UIViewController {
     private var liveRecoveryCount = 0
     private var lastLiveRecoveryAt = Date.distantPast
     private var vodRetryCount = 0
-    private var usingVODProxy = false
-    private var vodProxyAttempted = false
-    private var directVODFallbackAttempted = false
-    private var activePlaybackURL: URL
+    private var vodPlaybackURL: URL?
+    private var vodProxyStarted = false
+    private var vodDirectFallbackUsed = false
     private var resumePosition: Double = 0
     private var resumePromptShown = false
     private var subtitleCues: [SubtitleCue] = []
@@ -49,7 +48,6 @@ final class NativePlayerViewController: UIViewController {
 
     init(url: String, title: String, mediaType: String, year: String, portal: String, referer: String, userAgent: String) {
         self.streamURL = URL(string: url) ?? URL(string: "about:blank")!
-        self.activePlaybackURL = self.streamURL
         self.mediaTitle = title
         self.mediaType = mediaType
         self.year = year
@@ -206,28 +204,53 @@ final class NativePlayerViewController: UIViewController {
         button.heightAnchor.constraint(equalToConstant: 34).isActive = true
     }
 
-    private func configurePlayer() {
-        showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-
-        if isVOD && !vodProxyAttempted {
-            if let proxyURL = makeVODProxyURL() {
-                activePlaybackURL = proxyURL
-                usingVODProxy = true
-                vodProxyAttempted = true
-            } else {
-                activePlaybackURL = streamURL
-                usingVODProxy = false
-            }
+    private func playbackURL() -> URL {
+        guard isVOD, !vodProxyStarted, let proxy = makeWorkingVODProxyURL() else {
+            return vodPlaybackURL ?? streamURL
         }
-
-        createPlayerItem(for: activePlaybackURL)
+        vodProxyStarted = true
+        vodPlaybackURL = proxy
+        return proxy
     }
 
-    private func createPlayerItem(for url: URL) {
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
+    private func makeWorkingVODProxyURL() -> URL? {
+        guard var components = URLComponents(string: "https://vidiyow.com/api/stream.php") else { return nil }
+        let path = streamURL.path.lowercased()
+        let ext: String
+        if let dot = path.lastIndex(of: "."), dot < path.endIndex {
+            ext = String(path[path.index(after: dot)...])
+        } else {
+            ext = "mp4"
+        }
+        var items = [
+            URLQueryItem(name: "url", value: streamURL.absoluteString),
+            URLQueryItem(name: "vod", value: "1"),
+            URLQueryItem(name: "ext", value: ext)
+        ]
+        let r = referer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !r.isEmpty { items.append(URLQueryItem(name: "referer", value: r)) }
+        components.queryItems = items
+        return components.url
+    }
+
+    private func configurePlayer() {
+        showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
+        let url = playbackURL()
+        let options: [String: Any] = [
+            AVURLAssetHTTPUserAgentKey: userAgent,
+            "AVURLAssetHTTPHeaderFieldsKey": [
+                "User-Agent": userAgent,
+                "Accept": "*/*",
+                "Referer": referer
+            ]
+        ]
         let asset = AVURLAsset(url: url, options: options)
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isVOD ? 90 : 15
         player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = true
+        player.isMuted = false
+        player.volume = 1.0
         player.actionAtItemEnd = .pause
 
         playerLayer = AVPlayerLayer(player: player)
@@ -374,17 +397,13 @@ final class NativePlayerViewController: UIViewController {
     }
 
     @objc private func closePlayer() {
-        // Close only the native player. Do not alter the VOD playback pipeline.
-        // The underlying WKWebView is restored after dismissal.
         if isVOD { saveResume(player?.currentTime().seconds ?? 0) }
         player?.pause()
         controlsTimer?.invalidate()
         stallTimer?.invalidate()
         saveTimer?.invalidate()
         let presenter = presentingViewController as? WebPlayerViewController
-        dismiss(animated: true) {
-            presenter?.restoreWebPlayer()
-        }
+        dismiss(animated: true) { presenter?.restoreWebPlayer() }
     }
 
     private func resumeKey() -> String {
@@ -423,123 +442,86 @@ final class NativePlayerViewController: UIViewController {
     }
 
     private func recoverPlayback() {
-        guard isVOD else {
-            let now = Date()
-            guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else { return }
-            liveRecoveryCount += 1
-            lastLiveRecoveryAt = now
-            showLoading("Live stream herstellen…")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.recreatePlayer(at: 0, url: self?.streamURL) }
-            return
-        }
+        if isVOD {
+            let position = max(player?.currentTime().seconds ?? 0, loadResume())
+            saveResume(position)
 
-        let position = max(player?.currentTime().seconds ?? 0, loadResume())
-        saveResume(position)
-
-        // Do not loop forever on the same broken AVPlayer URL.
-        // VOD normally starts through the iOS HLS/FFmpeg proxy; if that fails,
-        // make exactly one direct Xtream attempt as a fallback.
-        if usingVODProxy && !directVODFallbackAttempted {
-            directVODFallbackAttempted = true
-            usingVODProxy = false
-            activePlaybackURL = streamURL
-            showLoading("Film herstellen…")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-                guard let self else { return }
-                self.recreatePlayer(at: position, url: self.streamURL)
+            // First recovery: restart the same working web-player proxy URL.
+            // Second and final recovery: direct Xtream URL. Never loop forever.
+            if vodRetryCount == 0 {
+                vodRetryCount = 1
+                showLoading("Film herstellen…")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self else { return }
+                    self.recreatePlayer(at: position, url: self.vodPlaybackURL ?? self.streamURL)
+                }
+            } else if !vodDirectFallbackUsed {
+                vodDirectFallbackUsed = true
+                showLoading("Film herstellen…")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self else { return }
+                    self.recreatePlayer(at: position, url: self.streamURL)
+                }
+            } else {
+                hideLoading()
+                loadingLabel.text = "Film kan niet worden afgespeeld."
+                loadingLabel.isHidden = false
+                spinner.stopAnimating()
+                spinner.isHidden = true
             }
             return
         }
 
-        // If the direct URL failed, retry the dedicated proxy once more.
-        if !usingVODProxy && vodProxyAttempted && vodRetryCount < 1, let proxyURL = makeVODProxyURL() {
-            vodRetryCount += 1
-            usingVODProxy = true
-            activePlaybackURL = proxyURL
-            showLoading("Film herstellen…")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                guard let self else { return }
-                self.recreatePlayer(at: position, url: proxyURL)
-            }
-            return
+        let now = Date()
+        guard liveRecoveryCount < 2, now.timeIntervalSince(lastLiveRecoveryAt) >= 30 else { return }
+        liveRecoveryCount += 1
+        lastLiveRecoveryAt = now
+        showLoading("Live stream herstellen…")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self else { return }
+            self.recreatePlayer(at: 0, url: self.streamURL)
         }
-
-        hideLoading()
-        loadingLabel.text = "Film kan niet worden afgespeeld."
-        loadingLabel.isHidden = false
-        spinner.stopAnimating()
-        spinner.isHidden = true
     }
 
-    private func makeVODProxyURL() -> URL? {
-        guard isVOD else { return nil }
-        guard var components = URLComponents(string: "https://vod.vidiyow.com/vod.php") else { return nil }
-
-        var items = [URLQueryItem(name: "url", value: streamURL.absoluteString)]
-        let cleanReferer = referer.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleanReferer.isEmpty {
-            items.append(URLQueryItem(name: "referer", value: cleanReferer))
-        }
-        if let match = streamURL.path.range(of: #"\.([A-Za-z0-9]+)$"#, options: .regularExpression) {
-            let ext = String(streamURL.path[match]).dropFirst()
-            if !ext.isEmpty {
-                items.append(URLQueryItem(name: "ext", value: String(ext).lowercased()))
-            }
-        }
-        items.append(URLQueryItem(name: "vod", value: "1"))
-        components.queryItems = items
-        return components.url
-    }
-
-    private func recreatePlayer(at position: Double, url: URL?) {
-        guard !isBeingDismissed, let url else { return }
+    private func recreatePlayer(at position: Double, url: URL) {
+        guard !isBeingDismissed else { return }
         statusObservation?.invalidate()
+        statusObservation = nil
         timeControlObservation?.invalidate()
-        if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
-        if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }
-        endObserver = nil
-        failureObserver = nil
+        timeControlObservation = nil
+        if let observer = endObserver { NotificationCenter.default.removeObserver(observer); endObserver = nil }
+        if let observer = failureObserver { NotificationCenter.default.removeObserver(observer); failureObserver = nil }
 
         player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        activePlaybackURL = url
-
-        let options: [String: Any] = [AVURLAssetHTTPUserAgentKey: userAgent]
+        let options: [String: Any] = [
+            AVURLAssetHTTPUserAgentKey: userAgent,
+            "AVURLAssetHTTPHeaderFieldsKey": [
+                "User-Agent": userAgent,
+                "Accept": "*/*",
+                "Referer": referer
+            ]
+        ]
         let asset = AVURLAsset(url: url, options: options)
         let item = AVPlayerItem(asset: asset)
+        item.preferredForwardBufferDuration = isVOD ? 90 : 15
         player?.replaceCurrentItem(with: item)
 
-        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+        statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
             DispatchQueue.main.async {
-                if item.status == .readyToPlay {
+                switch item.status {
+                case .readyToPlay:
                     if self.isVOD && position > 0 {
                         self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
                     }
                     self.hideLoading()
                     self.player?.play()
-                } else if item.status == .failed {
+                case .failed:
                     self.recoverPlayback()
+                default:
+                    break
                 }
             }
-        }
-
-        timeControlObservation = player?.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                if player.timeControlStatus == .playing { self.hideLoading(); self.updatePlayButton() }
-            }
-        }
-
-        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            if self.isVOD { self.clearResume() }
-            self.hideLoading()
-        }
-
-        failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemNewErrorLogEntry, object: item, queue: .main) { [weak self] _ in
-            guard let self, self.isVOD else { return }
-            self.saveResume(self.player?.currentTime().seconds ?? 0)
         }
     }
 
@@ -578,7 +560,9 @@ final class NativePlayerViewController: UIViewController {
             guard let self, let data, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let items = root["results"] as? [[String: Any]] else { return }
             var results: [(String,String,String)] = []
             for item in items {
-                guard let lang = item["language"] as? String, let fileID = item["file_id"] as? String, !lang.isEmpty, !fileID.isEmpty else { continue }
+                let lang = (item["language"] as? String) ?? (item["lang"] as? String) ?? ""
+                let fileID = (item["file_id"] as? String) ?? (item["fileID"] as? String) ?? (item["id"] as? String) ?? ""
+                guard !lang.isEmpty, !fileID.isEmpty else { continue }
                 results.append((lang, self.subtitleLabel(for: lang), fileID))
             }
             DispatchQueue.main.async { self.subtitleSearchResults = results }
