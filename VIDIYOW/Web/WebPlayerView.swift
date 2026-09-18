@@ -29,38 +29,14 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
           if (window.__vidiyowBridgeInstalled) return;
           window.__vidiyowBridgeInstalled = true;
           var deviceId = \(jsQuote(deviceID));
-          function enrichMeta(meta, action){
-              var m={};
-              try { m=JSON.parse(String(meta||'{}'))||{}; } catch(e) { m={}; }
-              try {
-                var activeId=localStorage.getItem('nova_active_source')||'';
-                var raw=localStorage.getItem('nova_sources')||'[]';
-                var sources=JSON.parse(raw);
-                if(Array.isArray(sources)){
-                  var source=sources.find(function(x){return String(x&&x.id||'')===String(activeId);});
-                  if(!source && sources.length===1) source=sources[0];
-                  if(source){
-                    if(!m.portal) m.portal=String(source.portal||source.server||'');
-                    if(!m.server) m.server=String(source.server||source.portal||'');
-                    if(!m.mac) m.mac=String(source.mac||'');
-                    if(!m.model) m.model=String(source.model||'MAG254');
-                    if(!m.session_id) m.session_id=String(source.session_id||'');
-                    if(!m.source_type) m.source_type=String(source.type||'');
-                  }
-                }
-              } catch(e) {}
-              if(!m.user_agent) m.user_agent='Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG250';
-              if(action==='stalker') m.media_type='live';
-              return JSON.stringify(m);
-          }
           window.VidiyowNativePlayer = {
             getDeviceId: function(){ return deviceId; },
             playVod: function(url, meta){
-              try { window.webkit.messageHandlers.vidiyowNative.postMessage({action:'vod',url:String(url||''),meta:enrichMeta(meta,'vod')}); } catch(e) {}
+              try { window.webkit.messageHandlers.vidiyowNative.postMessage({action:'vod',url:String(url||''),meta:String(meta||'{}')}); } catch(e) {}
               return Promise.resolve();
             },
             playStalker: function(url, meta){
-              try { window.webkit.messageHandlers.vidiyowNative.postMessage({action:'stalker',url:String(url||''),meta:enrichMeta(meta,'stalker')}); } catch(e) {}
+              try { window.webkit.messageHandlers.vidiyowNative.postMessage({action:'stalker',url:String(url||''),meta:String(meta||'{}')}); } catch(e) {}
               return Promise.resolve();
             }
           };
@@ -142,32 +118,6 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.load(URLRequest(url: VIDIYOWConstants.webPlayerURL, cachePolicy: .useProtocolCachePolicy))
     }
 
-    /// The native VOD player hides the web catalog while a film is playing.
-    /// Always restore the catalog when the native player is closed, including
-    /// when the app returns from the background with the same WKWebView alive.
-    func restoreWebPlayer() {
-        guard webView != nil else { return }
-        let script = """
-        (function(){
-          try {
-            document.documentElement.style.removeProperty('background');
-            if (document.body) {
-              document.body.style.removeProperty('background');
-              document.body.style.removeProperty('visibility');
-            }
-          } catch(e) {}
-        })();
-        """
-        webView.evaluateJavaScript(script, completionHandler: nil)
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        // Safety net for an already-loaded WKWebView that was hidden by a
-        // previous native VOD session.
-        restoreWebPlayer()
-    }
-
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "vidiyowNative", let body = message.body as? [String: Any], let action = body["action"] as? String, let url = body["url"] as? String, !url.isEmpty else { return }
         let metaString = body["meta"] as? String ?? "{}"
@@ -180,10 +130,10 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         let portal = meta["portal"] as? String ?? meta["server"] as? String ?? ""
         let server = meta["server"] as? String ?? portal
         let userAgent = meta["user_agent"] as? String ?? VIDIYOWConstants.defaultUserAgent
-        let sourceType = meta["source_type"] as? String ?? (action == "stalker" ? "stalker" : "")
-        let sessionId = meta["session_id"] as? String ?? ""
-        let mac = meta["mac"] as? String ?? ""
-        let model = meta["model"] as? String ?? "MAG254"
+
+        if action == "vod" {
+            hideWebPlayerForNativePlayback()
+        }
 
         let player = NativePlayerViewController(
             url: url,
@@ -191,15 +141,57 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
             mediaType: action == "stalker" ? "live" : mediaType,
             year: year,
             portal: portal,
-            referer: server.isEmpty ? portal : server,
-            userAgent: userAgent,
-            sourceType: sourceType,
-            sessionId: sessionId,
-            mac: mac,
-            model: model
+            referer: server,
+            userAgent: userAgent
         )
         player.modalPresentationStyle = .fullScreen
         present(player, animated: true)
+    }
+
+    func restoreWebPlayer() {
+        guard isViewLoaded, let webView else { return }
+        webView.isHidden = false
+        webView.alpha = 1.0
+        webView.bringSubviewToFront(webView)
+        let script = """
+        (function(){
+          try {
+            document.documentElement.style.removeProperty('background');
+            document.documentElement.style.removeProperty('visibility');
+            if (document.body) {
+              document.body.style.removeProperty('background');
+              document.body.style.removeProperty('visibility');
+            }
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    private func hideWebPlayerForNativePlayback() {
+        guard isViewLoaded, let webView else { return }
+        let script = """
+        (function(){
+          try {
+            document.documentElement.style.background = 'black';
+            document.body.style.background = 'black';
+            document.body.style.visibility = 'hidden';
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if presentedViewController == nil {
+            restoreWebPlayer()
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        restoreWebPlayer()
     }
 
     private func jsQuote(_ value: String) -> String {
