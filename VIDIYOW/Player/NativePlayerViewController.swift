@@ -280,8 +280,11 @@ final class NativePlayerViewController: UIViewController {
         player.isMuted = false
         player.volume = 1.0
         player.actionAtItemEnd = .pause
-        player.automaticallyWaitsToMinimizeStalling = true
-        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
+        // Keep Live TV close to the live edge. Do not apply the large VOD
+        // buffering policy to live HLS; it adds latency and can make playback
+        // appear to jump backwards when the live playlist advances.
+        player.automaticallyWaitsToMinimizeStalling = isVOD
+        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 0.0
 
         playerLayer = AVPlayerLayer(player: player)
         playerLayer.videoGravity = .resizeAspectFill
@@ -297,7 +300,13 @@ final class NativePlayerViewController: UIViewController {
                         self.player?.pause()
                         self.showResumeDialog()
                     } else {
-                        self.player?.play()
+                        if !self.isVOD {
+                            self.player?.seekToLatest { [weak self] _ in
+                                self?.player?.play()
+                            }
+                        } else {
+                            self.player?.play()
+                        }
                         self.hideControlsSoon()
                     }
                 } else if item.status == .failed {
@@ -530,16 +539,24 @@ final class NativePlayerViewController: UIViewController {
         ]
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
+        item.preferredForwardBufferDuration = isVOD ? 120.0 : 0.0
         player?.replaceCurrentItem(with: item)
         player?.isMuted = false
         player?.volume = 1.0
         statusObservation = item.observe(\AVPlayerItem.status, options: [.initial, .new]) { [weak self] item, _ in
             guard let self else { return }
             if item.status == .readyToPlay {
-                if self.isVOD && position > 0 { self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600)) }
+                if self.isVOD && position > 0 {
+                    self.player?.seek(to: CMTime(seconds: position, preferredTimescale: 600))
+                }
                 self.hideLoading()
-                self.player?.play()
+                if self.isVOD {
+                    self.player?.play()
+                } else {
+                    self.player?.seekToLatest { [weak self] _ in
+                        self?.player?.play()
+                    }
+                }
             } else if item.status == .failed {
                 if self.isVOD && !self.usedFallback {
                     self.usedFallback = true
