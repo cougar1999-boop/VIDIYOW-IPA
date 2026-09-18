@@ -120,12 +120,9 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         let splash = UIView()
         splash.backgroundColor = .black
         splash.translatesAutoresizingMaskIntoConstraints = false
-        splash.layer.zPosition = 9999
-
         let logo = UIImageView(image: UIImage(named: "LaunchLogo"))
         logo.contentMode = .scaleAspectFit
         logo.translatesAutoresizingMaskIntoConstraints = false
-
         splash.addSubview(logo)
         view.addSubview(splash)
         NSLayoutConstraint.activate([
@@ -138,13 +135,8 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
             logo.widthAnchor.constraint(lessThanOrEqualToConstant: 300),
             logo.heightAnchor.constraint(equalTo: logo.widthAnchor)
         ])
-
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            UIView.animate(withDuration: 0.2, animations: {
-                splash.alpha = 0
-            }, completion: { _ in
-                splash.removeFromSuperview()
-            })
+            UIView.animate(withDuration: 0.2, animations: { splash.alpha = 0 }) { _ in splash.removeFromSuperview() }
         }
     }
 
