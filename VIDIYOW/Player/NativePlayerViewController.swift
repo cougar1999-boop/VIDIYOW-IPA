@@ -24,10 +24,7 @@ final class NativePlayerViewController: UIViewController {
     private var timeControlObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var failureObserver: NSObjectProtocol?
-    private var stallTimer: Timer?
     private var saveTimer: Timer?
-    private var lastLiveTime: Double = -1
-    private var lastLiveProgressAt = Date()
     private var liveRecoveryCount = 0
     private var lastLiveRecoveryAt = Date.distantPast
     private var vodRetryCount = 0
@@ -88,8 +85,6 @@ final class NativePlayerViewController: UIViewController {
         if isVOD {
             searchSubtitles()
             startResumeSaver()
-        } else {
-            startLiveWatchdog()
         }
     }
 
@@ -112,7 +107,6 @@ final class NativePlayerViewController: UIViewController {
         if let observer = timeObserver { player?.removeTimeObserver(observer) }
         if let observer = endObserver { NotificationCenter.default.removeObserver(observer) }
         if let observer = failureObserver { NotificationCenter.default.removeObserver(observer) }
-        stallTimer?.invalidate()
         saveTimer?.invalidate()
         controlsTimer?.invalidate()
     }
@@ -266,22 +260,32 @@ final class NativePlayerViewController: UIViewController {
     private func configurePlayer() {
         activePlaybackURL = initialPlaybackURL()
         showLoading(isVOD ? "Film laden…" : "Kanaal laden…")
-        let options: [String: Any] = [
-            AVURLAssetHTTPUserAgentKey: userAgent,
-            "AVURLAssetHTTPHeaderFieldsKey": [
-                "User-Agent": userAgent,
-                "Accept": "*/*",
-                "Referer": referer
+        // Keep the proven Live TV AVPlayer setup from the working V3 build.
+        // VOD keeps the newer headers/buffering below; Live TV stays untouched
+        // by the VOD transport settings that caused slow starts/freezes.
+        let options: [String: Any]
+        if isVOD {
+            options = [
+                AVURLAssetHTTPUserAgentKey: userAgent,
+                "AVURLAssetHTTPHeaderFieldsKey": [
+                    "User-Agent": userAgent,
+                    "Accept": "*/*",
+                    "Referer": referer
+                ]
             ]
-        ]
+        } else {
+            options = [AVURLAssetHTTPUserAgentKey: userAgent]
+        }
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
         player = AVPlayer(playerItem: item)
         player.isMuted = false
         player.volume = 1.0
         player.actionAtItemEnd = .pause
-        player.automaticallyWaitsToMinimizeStalling = true
-        player.currentItem?.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
+        if isVOD {
+            player.automaticallyWaitsToMinimizeStalling = true
+            player.currentItem?.preferredForwardBufferDuration = 120.0
+        }
 
         playerLayer = AVPlayerLayer(player: player)
         playerLayer.videoGravity = .resizeAspectFill
@@ -437,7 +441,6 @@ final class NativePlayerViewController: UIViewController {
         // The VOD launch temporarily hides the underlying WKWebView, so restore
         // it after dismissal as well. This prevents a persistent black screen.
         player?.pause()
-        stallTimer?.invalidate()
         saveTimer?.invalidate()
         controlsTimer?.invalidate()
         subtitleLabel?.isHidden = true
@@ -520,17 +523,24 @@ final class NativePlayerViewController: UIViewController {
         }
         player?.pause()
         player?.replaceCurrentItem(with: nil)
-        let options: [String: Any] = [
-            AVURLAssetHTTPUserAgentKey: userAgent,
-            "AVURLAssetHTTPHeaderFieldsKey": [
-                "User-Agent": userAgent,
-                "Accept": "*/*",
-                "Referer": referer
+        let options: [String: Any]
+        if isVOD {
+            options = [
+                AVURLAssetHTTPUserAgentKey: userAgent,
+                "AVURLAssetHTTPHeaderFieldsKey": [
+                    "User-Agent": userAgent,
+                    "Accept": "*/*",
+                    "Referer": referer
+                ]
             ]
-        ]
+        } else {
+            options = [AVURLAssetHTTPUserAgentKey: userAgent]
+        }
         let asset = AVURLAsset(url: activePlaybackURL, options: options)
         let item = AVPlayerItem(asset: asset)
-        item.preferredForwardBufferDuration = isVOD ? 120.0 : 15.0
+        if isVOD {
+            item.preferredForwardBufferDuration = 120.0
+        }
         player?.replaceCurrentItem(with: item)
         player?.isMuted = false
         player?.volume = 1.0
@@ -556,25 +566,6 @@ final class NativePlayerViewController: UIViewController {
         saveTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, self.isVOD else { return }
             self.saveResume(self.player?.currentTime().seconds ?? 0)
-        }
-    }
-
-    private func startLiveWatchdog() {
-        lastLiveProgressAt = Date()
-        lastLiveTime = -1
-        stallTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            guard let self, let p = self.player else { return }
-            let now = Date()
-            let t = p.currentTime().seconds
-            if p.rate > 0, t.isFinite {
-                if self.lastLiveTime < 0 || t > self.lastLiveTime + 0.5 {
-                    self.lastLiveTime = t
-                    self.lastLiveProgressAt = now
-                }
-                if now.timeIntervalSince(self.lastLiveProgressAt) >= 45 { self.recoverPlayback(); self.lastLiveProgressAt = now }
-            } else if p.timeControlStatus == .waitingToPlayAtSpecifiedRate && now.timeIntervalSince(self.lastLiveProgressAt) >= 45 {
-                self.recoverPlayback(); self.lastLiveProgressAt = now
-            }
         }
     }
 
