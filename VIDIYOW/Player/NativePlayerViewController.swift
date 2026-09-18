@@ -432,7 +432,22 @@ final class NativePlayerViewController: UIViewController {
         hideControlsSoon()
     }
 
-    @objc private func closePlayer() { dismiss(animated: true) }
+    @objc private func closePlayer() {
+        // Stop the native player completely before returning to the catalog.
+        // The VOD launch temporarily hides the underlying WKWebView, so restore
+        // it after dismissal as well. This prevents a persistent black screen.
+        player?.pause()
+        stallTimer?.invalidate()
+        saveTimer?.invalidate()
+        controlsTimer?.invalidate()
+        subtitleLabel?.isHidden = true
+        if isVOD { saveResume(player?.currentTime().seconds ?? 0) }
+
+        let presenting = presentingViewController
+        dismiss(animated: true) {
+            (presenting as? WebPlayerViewController)?.restoreWebPlayer()
+        }
+    }
 
     private func resumeKey() -> String {
         let raw = "\(mediaType)|\(mediaTitle.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())|\(year.trimmingCharacters(in: .whitespacesAndNewlines))|\(portal.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"

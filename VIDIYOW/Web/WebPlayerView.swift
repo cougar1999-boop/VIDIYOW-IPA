@@ -142,6 +142,32 @@ final class WebPlayerViewController: UIViewController, WKNavigationDelegate, WKU
         webView.load(URLRequest(url: VIDIYOWConstants.webPlayerURL, cachePolicy: .useProtocolCachePolicy))
     }
 
+    /// The native VOD player hides the web catalog while a film is playing.
+    /// Always restore the catalog when the native player is closed, including
+    /// when the app returns from the background with the same WKWebView alive.
+    func restoreWebPlayer() {
+        guard webView != nil else { return }
+        let script = """
+        (function(){
+          try {
+            document.documentElement.style.removeProperty('background');
+            if (document.body) {
+              document.body.style.removeProperty('background');
+              document.body.style.removeProperty('visibility');
+            }
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Safety net for an already-loaded WKWebView that was hidden by a
+        // previous native VOD session.
+        restoreWebPlayer()
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "vidiyowNative", let body = message.body as? [String: Any], let action = body["action"] as? String, let url = body["url"] as? String, !url.isEmpty else { return }
         let metaString = body["meta"] as? String ?? "{}"
