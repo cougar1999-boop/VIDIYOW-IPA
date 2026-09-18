@@ -19,8 +19,8 @@ if [ -d "$ROOT/vidiyow" ]; then SOURCEMAP="vidiyow"; fi
 echo "Bronbestanden gedetecteerd in map: $SOURCEMAP"
 
 echo "Stap 2: Swift programmeerfouten automatisch repareren via Python..."
-# 2a: Specifieke reparaties voor NativePlayerViewController
-find "$ROOT" -name "NativePlayerViewController.swift" | while read -r FILE; do
+# We zoeken nu in álle mappen (hoofdletters/kleine letters) naar het juiste bestand
+find "$ROOT" -iname "NativePlayerViewController.swift" | while read -r FILE; do
   echo "Repareren van bestand: $FILE"
   python3 -c "
 import sys
@@ -37,8 +37,10 @@ code = code.replace(
     'NSLayoutConstraint(item: subtitleLabel, attribute: .bottom, relatedBy: .equal, toItem: view, attribute: .bottom, multiplier: 0.22, constant: 0).isActive = true'
 )
 
-# Herstel 2: Zet de ongedefinieerde AVURLAssetHTTPHeaderFieldsKey om naar een String key
+# Herstel 2: Zet de ongedefinieerde AVURLAssetHTTPHeaderFieldsKey correct om naar een String key inclusief de missende dubbelpunt
 code = code.replace('AVURLAssetHTTPHeaderFieldsKey', '\"AVURLAssetHTTPHeaderFieldsKey\"')
+# Mocht er door de vorige poging een syntaxfout zijn ontstaan zonder dubbelpunt, herstellen we dat hier direct:
+code = code.replace('\"AVURLAssetHTTPHeaderFieldsKey\" ', '\"AVURLAssetHTTPHeaderFieldsKey\": ')
 
 with open('$FILE', 'w') as f:
     f.write(code)
@@ -97,7 +99,6 @@ echo "Stap 4: Schoon Xcode project genereren..."
 xcodegen generate
 
 echo "Stap 5: App archiveren voor echte iPhone..."
-# We vangen de log op om bij een compiler-crash exact te tonen welke regel code fout is
 xcodebuild \
   -project "$ROOT/VIDIYOW.xcodeproj" \
   -scheme "VIDIYOW" \
